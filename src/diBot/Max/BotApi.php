@@ -68,36 +68,44 @@ class BotApi extends AbstractBotApi
     ): array {
         $this->assertText($text, $isCaption);
         $attachments = [];
-        if ($isCaption) {
-            $message = $this->request('GET', '/messages/' . rawurlencode($messageId));
-            $existing = $message['body']['attachments'] ?? null;
-            if (!is_array($existing) || !array_is_list($existing)) {
+        $message = $this->request('GET', '/messages/' . rawurlencode($messageId));
+        $messageBody = $message['body'] ?? null;
+        if (!is_array($messageBody)) {
+            throw new ApiException(200, 'invalid_message');
+        }
+        $existing = array_key_exists('attachments', $messageBody)
+            ? $messageBody['attachments']
+            : [];
+        if (!is_array($existing) || !array_is_list($existing)) {
+            throw new ApiException(200, 'invalid_attachments');
+        }
+        foreach ($existing as $attachment) {
+            if (!is_array($attachment) || !is_string($attachment['type'] ?? null)) {
                 throw new ApiException(200, 'invalid_attachments');
             }
-            foreach ($existing as $attachment) {
-                if (!is_array($attachment) || !is_string($attachment['type'] ?? null)) {
-                    throw new ApiException(200, 'invalid_attachments');
-                }
-                if ($attachment['type'] === 'inline_keyboard') {
-                    continue;
-                }
-                // GET и PUT имеют разные схемы: переносим только токен фото/документа.
-                if (!in_array($attachment['type'], ['image', 'file'], true)) {
-                    throw new ApiException(200, 'unsupported_attachment');
-                }
-                $payload = $attachment['payload'] ?? null;
-                if (
-                    !is_array($payload) ||
-                    !is_string($payload['token'] ?? null) ||
-                    $payload['token'] === ''
-                ) {
-                    throw new ApiException(200, 'invalid_attachments');
-                }
-                $attachments[] = [
-                    'type' => $attachment['type'],
-                    'payload' => ['token' => $payload['token']],
-                ];
+            if ($attachment['type'] === 'inline_keyboard') {
+                continue;
             }
+            if (!$isCaption) {
+                // attachments: [] удалит медиа; ошибка режима должна остановить PUT.
+                throw new ApiException(200, 'caption_required');
+            }
+            // GET и PUT имеют разные схемы: переносим только токен фото/документа.
+            if (!in_array($attachment['type'], ['image', 'file'], true)) {
+                throw new ApiException(200, 'unsupported_attachment');
+            }
+            $payload = $attachment['payload'] ?? null;
+            if (
+                !is_array($payload) ||
+                !is_string($payload['token'] ?? null) ||
+                $payload['token'] === ''
+            ) {
+                throw new ApiException(200, 'invalid_attachments');
+            }
+            $attachments[] = [
+                'type' => $attachment['type'],
+                'payload' => ['token' => $payload['token']],
+            ];
         }
         return $this->request('PUT', '/messages', $this->body($text, $keyboard, $attachments), [
             'message_id' => $messageId,

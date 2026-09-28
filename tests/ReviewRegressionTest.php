@@ -169,9 +169,12 @@ final class ReviewRegressionTest extends TestCase
     public function testMaxRemovesKeyboardWithoutEmptyAttachment(): void
     {
         foreach ([null, new Keyboard()] as $keyboard) {
-            $http = new FakeClient([FakeClient::json(['success' => true])]);
+            $http = new FakeClient([
+                FakeClient::json(['body' => ['attachments' => []]]),
+                FakeClient::json(['success' => true]),
+            ]);
             (new Max(new Config('token'), $http))->editMessage('1', 'mid', 'edited', $keyboard);
-            self::assertSame([], json_decode($http->requests[0]->body, true)['attachments']);
+            self::assertSame([], json_decode($http->requests[1]->body, true)['attachments']);
         }
         $http = new FakeClient([$this->ok()]);
         (new Telegram(new Config('token'), $http))->editMessage('1', '2', 'edited');

@@ -37,9 +37,10 @@ and public downloads, and caps API response bodies at 8 MiB. `Http\Client` is in
 ```php
 use diBot\Outgoing\{Media,Sender};
 
-$result = (new Sender($api))->send('12345', 'Your result', fn() => new Media(
+$text = 'Your result';
+$result = (new Sender($api))->send('12345', $text, fn() => new Media(
     kind: 'document', mime: 'application/pdf', size: filesize($path), localPath: $path
-), fallbackText: 'Download your result: https://example.com/result.pdf');
+), fallbackText: $text . "\n\nDownload: https://example.com/result.pdf");
 ```
 
 `Policy` decides once, then `Sender` calls the transport. A definitive media refusal
@@ -60,7 +61,13 @@ Both adapters use a conservative **7 MiB** upload budget, compatible with an 8 M
 Telegram proxy buffer. This is a library limit, not MAX's native upload ceiling.
 Local files are preferred and their actual size is checked before upload. MAX photos
 up to 5 MiB may instead use a supplied public URL. Telegram uses local uploads because
-it may not reach the application's public host. Oversized captions cause text fallback.
+it may not reach the application's public host. A `caption_too_long` decision skips
+media and sends the original `$text` with its keyboard, ignoring `$fallbackText`.
+This preserves the main text when only the caption limit is exceeded. The text must
+still fit `TEXT_MAX_UNITS`; otherwise sending fails without replacing it with a shorter
+fallback. Splitting longer text or sending media and text separately belongs to the app.
+For other fallback paths, `$fallbackText` replaces `$text` completely: include all text
+that must reach the user, as in the example above.
 
 MAX `attachment.not.ready` retries use 2/4/8 second delays only when
 `Config(retryMediaInCli: true)` is explicitly set and `PHP_SAPI === 'cli'`.
@@ -74,8 +81,13 @@ its `attachment.not.ready` remains a plain `ApiException` and can fall back to t
 Never log the file ID or signed download URLs.
 
 `editMessage(..., keyboard: null)` and an empty `Keyboard` remove existing buttons.
-Use `isCaption: true` for messages with media: MAX first reads and retains non-keyboard
-photo/document tokens, then replaces the buttons; Telegram edits the caption.
+MAX reads the current message before every edit. Without `isCaption: true`, any
+non-keyboard attachment causes `ApiException(reason: 'caption_required')` before PUT.
+Thus accidentally editing a media message as text cannot remove its media. A missing
+or malformed message/attachment list also aborts the edit.
+Use `isCaption: true` for messages with media: MAX retains photo/document tokens, then
+replaces the buttons; Telegram edits the caption. GET and PUT are separate requests;
+the application should serialize edits to the same message.
 MAX response-only fields (`photo_id`, `url`) are not echoed into the edit request.
 Malformed attachments, missing tokens and unsupported media abort before PUT so an
 edit cannot silently delete them. With no media,

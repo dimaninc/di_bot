@@ -19,6 +19,7 @@ readonly final class Sender
         ?string $fallbackText = null,
         bool $fallbackWhenBlocked = true
     ): array {
+        $plainText = $fallbackText ?? $text;
         if ($this->mediaEnabled && $mediaFactory !== null) {
             try {
                 $media = $mediaFactory();
@@ -37,6 +38,10 @@ readonly final class Sender
                         );
                     }
                     $this->api->log('Media refused', ['reason' => $decision->reason]);
+                    if ($decision->reason === 'caption_too_long') {
+                        // Ограничение подписи не должно заменять основной текст короткой ссылкой.
+                        $plainText = $text;
+                    }
                 }
             } catch (ApiException $e) {
                 if (
@@ -53,6 +58,6 @@ readonly final class Sender
             }
         }
         // Вне try: ошибка запасного текста не должна отправить его повторно.
-        return $this->api->sendMessage($chatId, $fallbackText ?? $text, $keyboard);
+        return $this->api->sendMessage($chatId, $plainText, $keyboard);
     }
 }
