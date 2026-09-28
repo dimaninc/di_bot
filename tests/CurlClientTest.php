@@ -18,8 +18,19 @@ namespace diBot\Http {
         if (!\diBot\Tests\CurlProbe::$active) {
             return \curl_exec($handle);
         }
+        $header = \diBot\Tests\CurlProbe::$options[CURLOPT_HEADERFUNCTION];
+        foreach (\diBot\Tests\CurlProbe::$headers as $line) {
+            if ($header($handle, $line) !== strlen($line)) {
+                return false;
+            }
+        }
         $writer = \diBot\Tests\CurlProbe::$options[CURLOPT_WRITEFUNCTION];
-        return $writer($handle, '{"ok":true}') > 0;
+        foreach (\diBot\Tests\CurlProbe::$chunks as $chunk) {
+            if ($writer($handle, $chunk) !== strlen($chunk)) {
+                return false;
+            }
+        }
+        return true;
     }
     function curl_getinfo($handle, int $option)
     {
@@ -31,6 +42,8 @@ namespace diBot\Tests {
     {
         public static bool $active = false;
         public static array $options = [];
+        public static array $headers = [];
+        public static array $chunks = ['{"ok":true}'];
     }
     final class CurlClientTest extends \PHPUnit\Framework\TestCase
     {
@@ -38,6 +51,8 @@ namespace diBot\Tests {
         {
             CurlProbe::$active = true;
             CurlProbe::$options = [];
+            CurlProbe::$headers = [];
+            CurlProbe::$chunks = ['{"ok":true}'];
         }
         protected function tearDown(): void
         {
@@ -75,6 +90,55 @@ namespace diBot\Tests {
             self::assertSame('/selected-ca', CurlProbe::$options[CURLOPT_CAINFO]);
             $writer = CurlProbe::$options[CURLOPT_WRITEFUNCTION];
             self::assertSame(0, $writer(null, str_repeat('x', 8 * 1024 * 1024)));
+        }
+        public function testDownloadCapAbortsDuringTransferWithoutTrustingContentLength(): void
+        {
+            CurlProbe::$headers = ["HTTP/2 200\r\n", "Content-Length: 1\r\n"];
+            CurlProbe::$chunks = ['123', '456'];
+            try {
+                (new \diBot\Http\CurlClient())->send(
+                    new \diBot\Http\Request(
+                        'GET',
+                        'https://8.8.8.8/file',
+                        publicDownload: true,
+                        maxResponseBytes: 5
+                    )
+                );
+                self::fail();
+            } catch (\diBot\Exception\ApiException $e) {
+                self::assertSame('response_too_large', $e->reason);
+            }
+            self::assertSame(['8.8.8.8:443:8.8.8.8'], CurlProbe::$options[CURLOPT_RESOLVE]);
+            self::assertSame('', CurlProbe::$options[CURLOPT_PROXY]);
+        }
+        public function testDownloadCapturesOnlyFinalHeadersAndAcceptsExactSizeLimit(): void
+        {
+            CurlProbe::$headers = [
+                "HTTP/1.1 100 Continue\r\n",
+                "Location: https://discard.example\r\n",
+                "HTTP/2 200\r\n",
+                "Content-Type: image/png\r\n",
+                "Retry-After: 12\r\n",
+                "Set-Cookie: SECRET\r\n",
+            ];
+            CurlProbe::$chunks = ['123', '45'];
+            $r = (new \diBot\Http\CurlClient())->send(
+                new \diBot\Http\Request(
+                    'GET',
+                    'https://8.8.8.8/file',
+                    publicDownload: true,
+                    maxResponseBytes: 5
+                )
+            );
+            self::assertSame('12345', $r->body);
+            self::assertSame(['content-type' => 'image/png', 'retry-after' => '12'], $r->headers);
+        }
+        public function testDownloadRejectsPrivateAddressBeforeOpeningConnection(): void
+        {
+            $this->expectException(\InvalidArgumentException::class);
+            (new \diBot\Http\CurlClient())->send(
+                new \diBot\Http\Request('GET', 'https://127.0.0.1/file', publicDownload: true)
+            );
         }
     }
 }

@@ -16,6 +16,8 @@ abstract class AbstractUpdate
     public string $callbackId = '';
     public string $payload = '';
     public array $userProfile = [];
+    /** @var list<\diBot\Attachment\Attachment> */
+    public array $attachments = [];
 
     public function isCallback(): bool
     {

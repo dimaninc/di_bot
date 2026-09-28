@@ -33,6 +33,57 @@ class BotApi extends AbstractBotApi
         ]);
     }
 
+    public function rateLimitDelay(array $response, int $httpStatus = 0): int
+    {
+        if (($response['error_code'] ?? 0) !== 429 && $httpStatus !== 429) {
+            return 0;
+        }
+        return ApiException::retrySeconds($response['parameters']['retry_after'] ?? null);
+    }
+
+    public function downloadAttachment(string $ref, string $url = ''): \diBot\Attachment\Download
+    {
+        if ($ref === '') {
+            throw new \diBot\Exception\DownloadException(0, 'missing_ref', true);
+        }
+        try {
+            $meta = $this->request('getFile', ['file_id' => $ref]);
+        } catch (ApiException $e) {
+            throw new \diBot\Exception\DownloadException(
+                $e->httpStatus,
+                $e->reason,
+                in_array($e->httpStatus, [400, 404], true),
+                $e->retryAfter
+            );
+        }
+        $path = $meta['result']['file_path'] ?? null;
+        // Кодируем сегменты отдельно: file_path не может сменить хост или выйти из /file/.
+        $segments = is_string($path) ? explode('/', $path) : [];
+        if (
+            !$segments ||
+            strlen($path) > 2048 ||
+            array_intersect($segments, ['', '.', '..']) ||
+            preg_match('/[\\x00-\\x20\\x7f\\\\]/', $path)
+        ) {
+            throw new \diBot\Exception\DownloadException(200, 'invalid_file_path', true);
+        }
+        $path = implode('/', array_map('rawurlencode', $segments));
+        if (
+            is_int($meta['result']['file_size'] ?? null) &&
+            $meta['result']['file_size'] > $this->config->maxDownloadBytes
+        ) {
+            throw new \diBot\Exception\DownloadException(200, 'too_big', true);
+        }
+        $base = rtrim($this->config->baseUrl ?: self::DEFAULT_BASE_URL, '/');
+        $headers =
+            $base === self::DEFAULT_BASE_URL ? [] : ['X-Proxy-Auth: ' . $this->config->proxySecret];
+        return (new \diBot\Attachment\Downloader($this->http, $this->config))->download(
+            $base . '/file/bot' . $this->config->token . '/' . $path,
+            $headers,
+            false
+        );
+    }
+
     public function sendMessage(string $chatId, string $text, ?Keyboard $keyboard = null): array
     {
         $this->assertText($text);
@@ -223,14 +274,24 @@ class BotApi extends AbstractBotApi
                 $this->config->connectTimeout
             )
         );
-        $data = $response->json();
+        try {
+            $data = $response->json();
+        } catch (ApiException $e) {
+            if ($response->status !== 429) {
+                throw $e;
+            }
+            $data = [];
+        }
+        $delay = $this->rateLimitDelay($data, $response->status);
+        if ($delay > 0) {
+            $delay = max(
+                $delay,
+                ApiException::retrySeconds($response->headers['retry-after'] ?? null)
+            );
+            throw new ApiException($response->status, 'rate_limit', retryAfter: $delay);
+        }
         if ($response->status < 200 || $response->status >= 300 || ($data['ok'] ?? null) !== true) {
-            $blocked =
-                ($data['error_code'] ?? 0) === 403 &&
-                str_contains(
-                    strtolower(is_string($data['description'] ?? null) ? $data['description'] : ''),
-                    'blocked'
-                );
+            $blocked = ($data['error_code'] ?? $response->status) === 403;
             $this->log('Telegram API rejected request', [
                 'status' => $response->status,
                 'shape' => \diBot\BodyShape::describe($body),

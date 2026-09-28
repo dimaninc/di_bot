@@ -35,7 +35,58 @@ final class Update extends AbstractUpdate
         } else {
             $u->text = self::string($msg['text'] ?? ($msg['caption'] ?? ''));
             $u->parseCommand();
+            $u->attachments = self::parseAttachments($msg);
         }
         return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
+    }
+    private static function parseAttachments(array $message): array
+    {
+        $result = [];
+        $photos = is_array($message['photo'] ?? null) ? $message['photo'] : [];
+        $largest = null;
+        $area = -1;
+        foreach ($photos as $photo) {
+            if (!is_array($photo) || self::string($photo['file_id'] ?? '') === '') {
+                continue;
+            }
+            $w = is_int($photo['width'] ?? null) ? max(0, $photo['width']) : 0;
+            $h = is_int($photo['height'] ?? null) ? max(0, $photo['height']) : 0;
+            if ($w * $h >= $area) {
+                $largest = $photo;
+                $area = $w * $h;
+            }
+        }
+        if ($largest !== null) {
+            $result[] = self::attachment($largest, 'photo', 'image/jpeg');
+        }
+        $document = $message['document'] ?? null;
+        if (
+            is_array($document) &&
+            self::string($document['file_id'] ?? '') !== '' &&
+            !is_array($message['animation'] ?? null)
+        ) {
+            $mime = self::string($document['mime_type'] ?? '');
+            $name = self::string($document['file_name'] ?? '');
+            $result[] = self::attachment(
+                $document,
+                \diBot\Attachment\KindResolver::resolve($mime, $name),
+                $mime
+            );
+        }
+        return $result;
+    }
+
+    private static function attachment(
+        array $file,
+        string $kind,
+        string $mime
+    ): \diBot\Attachment\Attachment {
+        return new \diBot\Attachment\Attachment(
+            $kind,
+            self::string($file['file_id']),
+            mime: $mime,
+            size: is_int($file['file_size'] ?? null) ? max(0, $file['file_size']) : 0,
+            filename: self::string($file['file_name'] ?? '')
+        );
     }
 }

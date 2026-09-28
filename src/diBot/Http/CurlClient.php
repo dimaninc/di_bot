@@ -24,7 +24,7 @@ final class CurlClient implements Client
         if ($request->body !== null) {
             $options[CURLOPT_POSTFIELDS] = $request->body;
         }
-        if ($request->publicUpload) {
+        if ($request->publicUpload || $request->publicDownload) {
             [$host, $ip] = UploadUrl::resolve($request->url);
             // Фиксируем проверенный DNS-ответ; прокси мог бы разрешить имя заново.
             $options[CURLOPT_PROXY] = '';
@@ -34,9 +34,43 @@ final class CurlClient implements Client
         } elseif ($request->caBundle !== null) {
             $options[CURLOPT_CAINFO] = $request->caBundle;
         }
+        $headers = [];
+        $headerBytes = 0;
+        $tooLarge = false;
+        $options[CURLOPT_HEADERFUNCTION] = static function ($ch, string $line) use (
+            &$headers,
+            &$headerBytes,
+            &$tooLarge
+        ): int {
+            $headerBytes += strlen($line);
+            if ($headerBytes > 65536) {
+                $tooLarge = true;
+                return 0;
+            }
+            if (str_starts_with($line, 'HTTP/')) {
+                $headers = [];
+            }
+            $pair = explode(':', $line, 2);
+            if (
+                count($pair) === 2 &&
+                in_array(
+                    strtolower(trim($pair[0])),
+                    ['content-type', 'location', 'retry-after'],
+                    true
+                )
+            ) {
+                $headers[strtolower(trim($pair[0]))] = trim($pair[1]);
+            }
+            return strlen($line);
+        };
         $body = '';
-        $options[CURLOPT_WRITEFUNCTION] = static function ($ch, string $chunk) use (&$body): int {
-            if (strlen($body) + strlen($chunk) > 8 * 1024 * 1024) {
+        $options[CURLOPT_WRITEFUNCTION] = static function ($ch, string $chunk) use (
+            &$body,
+            &$tooLarge,
+            $request
+        ): int {
+            if (strlen($body) + strlen($chunk) > $request->maxResponseBytes) {
+                $tooLarge = true;
                 return 0;
             }
             $body .= $chunk;
@@ -51,9 +85,20 @@ final class CurlClient implements Client
             $ok = curl_exec($ch);
             $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             if ($ok === false) {
-                throw new ApiException($status, 'network_error');
+                throw new ApiException(
+                    $status,
+                    $tooLarge
+                        ? 'response_too_large'
+                        : (in_array(
+                            curl_errno($ch),
+                            [CURLE_PEER_FAILED_VERIFICATION, CURLE_SSL_CERTPROBLEM],
+                            true
+                        )
+                            ? 'tls_untrusted_ca'
+                            : 'network_error')
+                );
             }
-            return new Response($status, $body);
+            return new Response($status, $body, $headers);
         } finally {
             curl_close($ch);
         }

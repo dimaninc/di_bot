@@ -46,6 +46,7 @@ abstract class AbstractBotApi
         string $caption = '',
         ?Keyboard $keyboard = null
     ): array;
+    /** null/пустая клавиатура удаляет кнопки; isCaption сохраняет медиа. */
     abstract public function editMessage(
         string $chatId,
         string $messageId,
@@ -55,6 +56,11 @@ abstract class AbstractBotApi
     ): array;
     abstract public function answerCallback(string $callbackId, string $notification = ''): array;
     abstract public function getMe(): array;
+    abstract public function rateLimitDelay(array $response, int $httpStatus = 0): int;
+    abstract public function downloadAttachment(
+        string $ref,
+        string $url = ''
+    ): \diBot\Attachment\Download;
     /** @param list<array{command:string,description:string}> $commands */
     abstract public function setCommands(array $commands): array;
     abstract public function setWebhook(string $url): array;

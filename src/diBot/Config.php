@@ -12,7 +12,9 @@ readonly final class Config
         public int $connectTimeout = 10,
         public int $requestTimeout = 30,
         public int $uploadTimeout = 60,
-        public bool $retryMediaInCli = false
+        public bool $retryMediaInCli = false,
+        public int $maxDownloadBytes = 5 * 1024 * 1024,
+        public int $downloadTimeout = 30
     ) {
         foreach ([$token, $proxySecret, $webhookSecret] as $secret) {
             if (preg_match('/[\x00-\x20\x7f]/', $secret)) {
@@ -24,8 +26,11 @@ readonly final class Config
         if ($baseUrl !== '') {
             self::assertHttpsUrl($baseUrl);
         }
-        if (min($connectTimeout, $requestTimeout, $uploadTimeout) < 1) {
+        if (min($connectTimeout, $requestTimeout, $uploadTimeout, $downloadTimeout) < 1) {
             throw new \InvalidArgumentException('Timeouts must be positive');
+        }
+        if ($maxDownloadBytes < 1 || $maxDownloadBytes > 20 * 1024 * 1024) {
+            throw new \InvalidArgumentException('Download limit must be between 1 byte and 20 MiB');
         }
         if ($caBundle !== null && !is_readable($caBundle)) {
             throw new \InvalidArgumentException('CA bundle is not readable');

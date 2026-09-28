@@ -37,6 +37,7 @@ final class Update extends AbstractUpdate
             } else {
                 $u->text = self::string($body['text'] ?? '');
                 $u->parseCommand();
+                $u->attachments = self::parseAttachments($body['attachments'] ?? []);
                 if ($u->messageId === '') {
                     return null;
                 }
@@ -56,5 +57,41 @@ final class Update extends AbstractUpdate
             $u->chatId . ':' . $u->userId . ':' . self::string($data['timestamp'] ?? ''));
         $u->updateId = hash('sha256', $type . ':' . $identity);
         return $u->chatId !== '' && $u->userId !== '' ? $u : null;
+    }
+    private static function parseAttachments(mixed $attachments): array
+    {
+        $result = [];
+        foreach (is_array($attachments) ? $attachments : [] as $attachment) {
+            if (
+                !is_array($attachment) ||
+                !in_array($attachment['type'] ?? '', ['image', 'file'], true)
+            ) {
+                continue;
+            }
+            $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
+            $ref =
+                self::string($payload['token'] ?? '') ?: self::string($payload['photo_id'] ?? '');
+            $url = self::string($payload['url'] ?? '');
+            if ($ref === '' && $url === '') {
+                continue;
+            }
+            $name =
+                self::string($attachment['filename'] ?? '') ?:
+                self::string($payload['filename'] ?? '');
+            $size = is_int($attachment['size'] ?? null) ? max(0, $attachment['size']) : 0;
+            if (!$size) {
+                $size = is_int($payload['size'] ?? null) ? max(0, $payload['size']) : 0;
+            }
+            $result[] = new \diBot\Attachment\Attachment(
+                $attachment['type'] === 'image'
+                    ? 'photo'
+                    : \diBot\Attachment\KindResolver::resolve('', $name),
+                $ref,
+                $url,
+                size: $size,
+                filename: $name
+            );
+        }
+        return $result;
     }
 }

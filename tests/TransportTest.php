@@ -255,7 +255,7 @@ final class TransportTest extends TestCase
         (new Max(new Config('token'), $http))->editMessage('1', 'mid', 'Answered', isCaption: true);
         $body = json_decode($http->requests[1]->body, true);
         self::assertSame('photo', $body['attachments'][0]['payload']['token']);
-        self::assertSame([], $body['attachments'][1]['payload']['buttons']);
+        self::assertCount(1, $body['attachments']);
     }
 
     public function testNonEmptyMaxBatchCannotSilentlyLoseItsCursor(): void

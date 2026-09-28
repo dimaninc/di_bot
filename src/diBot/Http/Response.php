@@ -5,7 +5,7 @@ use diBot\Exception\ApiException;
 
 readonly final class Response
 {
-    public function __construct(public int $status, public string $body)
+    public function __construct(public int $status, public string $body, public array $headers = [])
     {
     }
 

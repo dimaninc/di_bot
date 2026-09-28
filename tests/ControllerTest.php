@@ -89,7 +89,7 @@ final class ControllerTest extends TestCase
             self::assertCount(0, $http->requests);
         }
     }
-    public function testCheckpointOnlyAfterSuccessfulBatch(): void
+    public function testCheckpointAfterBatchIncludingFailedHandlers(): void
     {
         $http = new FakeClient([
             FakeClient::json(['ok' => true, 'result' => true]),
@@ -108,11 +108,7 @@ final class ControllerTest extends TestCase
         $controller = new TestController(new BotApi(new Config('123:token'), $http));
         $controller->fail = true;
         $store = new MemoryCursor();
-        try {
-            $controller->poll($store, 1);
-            self::fail();
-        } catch (\RuntimeException) {
-        }
-        self::assertSame(['2'], $store->saves);
+        $controller->poll($store, 1);
+        self::assertSame(['2', '13'], $store->saves);
     }
 }

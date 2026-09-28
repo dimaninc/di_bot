@@ -2,7 +2,7 @@
 namespace diBot\Max;
 
 use diBot\{AbstractBotApi, Config, Keyboard, Platform, PollBatch};
-use diBot\Exception\ApiException;
+use diBot\Exception\{ApiException, MediaNotReadyException};
 use diBot\Http\{Multipart, Request};
 use diBot\Outgoing\{Media, Transport};
 
@@ -37,6 +37,20 @@ class BotApi extends AbstractBotApi
         return dirname(__DIR__, 3) . '/resources/max-api-ca-bundle.pem';
     }
 
+    public function rateLimitDelay(array $response, int $httpStatus = 0): int
+    {
+        $code = is_string($response['code'] ?? null) ? strtolower($response['code']) : '';
+        return $httpStatus === 429 || str_contains($code, 'too.many.requests') ? 1 : 0;
+    }
+
+    public function downloadAttachment(string $ref, string $url = ''): \diBot\Attachment\Download
+    {
+        if ($url === '') {
+            throw new \diBot\Exception\DownloadException(0, 'missing_url', true);
+        }
+        return (new \diBot\Attachment\Downloader($this->http, $this->config))->download($url);
+    }
+
     public function sendMessage(string $chatId, string $text, ?Keyboard $keyboard = null): array
     {
         $this->assertText($text);
@@ -65,12 +79,9 @@ class BotApi extends AbstractBotApi
                 }
             }
         }
-        return $this->request(
-            'PUT',
-            '/messages',
-            $this->body($text, $keyboard ?? new Keyboard(), $attachments),
-            ['message_id' => $messageId]
-        );
+        return $this->request('PUT', '/messages', $this->body($text, $keyboard, $attachments), [
+            'message_id' => $messageId,
+        ]);
     }
 
     public function sendMedia(
@@ -123,6 +134,15 @@ class BotApi extends AbstractBotApi
                     true
                 )
             );
+            if ($uploaded->status === 429) {
+                throw new ApiException(
+                    429,
+                    'rate_limit',
+                    retryAfter: ApiException::retrySeconds(
+                        $uploaded->headers['retry-after'] ?? null
+                    )
+                );
+            }
             // Хранилище вправе вернуть пустое 2xx; успех определяется HTTP-кодом.
             if ($uploaded->status < 200 || $uploaded->status >= 300) {
                 throw new ApiException($uploaded->status, 'upload_failed');
@@ -155,7 +175,9 @@ class BotApi extends AbstractBotApi
         }
         return $this->postMedia(
             $chatId,
-            $this->body($media->caption, $keyboard, [['type' => $type, 'payload' => $payload]])
+            $this->body($media->caption, $keyboard, [['type' => $type, 'payload' => $payload]]),
+            $media->kind,
+            $payload['token'] ?? null
         );
     }
 
@@ -174,7 +196,9 @@ class BotApi extends AbstractBotApi
             $chatId,
             $this->body($caption, $keyboard, [
                 ['type' => $kind === 'photo' ? 'image' : 'file', 'payload' => ['token' => $fileId]],
-            ])
+            ]),
+            $kind,
+            $fileId
         );
     }
 
@@ -187,14 +211,24 @@ class BotApi extends AbstractBotApi
         sleep($seconds);
     }
 
-    private function postMedia(string $chatId, array $body): array
-    {
+    private function postMedia(
+        string $chatId,
+        #[\SensitiveParameter] array $body,
+        string $kind,
+        #[\SensitiveParameter] ?string $fileId
+    ): array {
         $delays = $this->canRetryMedia() ? [2, 4, 8] : [];
         while (true) {
             try {
                 return $this->request('POST', '/messages', $body, ['chat_id' => $chatId]);
             } catch (ApiException $e) {
-                if ($e->reason !== 'attachment.not.ready' || !$delays) {
+                if ($e->reason !== 'attachment.not.ready') {
+                    throw $e;
+                }
+                if (!$delays) {
+                    if ($fileId !== null) {
+                        throw new MediaNotReadyException($e->httpStatus, $kind, $fileId);
+                    }
                     throw $e;
                 }
                 $this->pause(array_shift($delays));
@@ -204,6 +238,10 @@ class BotApi extends AbstractBotApi
 
     public function answerCallback(string $callbackId, string $notification = ''): array
     {
+        // MAX требует notification или message; тихого подтверждения у API нет.
+        if ($notification === '') {
+            return ['ok' => true];
+        }
         return $this->request(
             'POST',
             '/answers',
@@ -255,10 +293,10 @@ class BotApi extends AbstractBotApi
             query: $query,
             timeout: $timeout + $this->config->requestTimeout
         );
-        if (!is_array($result['updates'] ?? null) || !array_key_exists('marker', $result)) {
+        if (!is_array($result['updates'] ?? null)) {
             throw new ApiException(200, 'invalid_updates');
         }
-        $marker = $result['marker'];
+        $marker = $result['marker'] ?? null;
         if ($marker !== null && !is_int($marker) && !is_string($marker)) {
             throw new ApiException(200, 'invalid_marker');
         }
@@ -283,7 +321,10 @@ class BotApi extends AbstractBotApi
     private function body(string $text, ?Keyboard $keyboard, array $attachments = []): array
     {
         if ($keyboard !== null) {
-            $attachments[] = $keyboard->render($this->platform());
+            $rendered = $keyboard->render($this->platform());
+            if ($rendered['payload']['buttons'] !== []) {
+                $attachments[] = $rendered;
+            }
         }
         return ['text' => $text, 'attachments' => $attachments];
     }
@@ -320,7 +361,22 @@ class BotApi extends AbstractBotApi
                 $ca
             )
         );
-        $data = $response->json();
+        try {
+            $data = $response->json();
+        } catch (ApiException $e) {
+            if ($response->status !== 429) {
+                throw $e;
+            }
+            $data = [];
+        }
+        $delay = $this->rateLimitDelay($data, $response->status);
+        if ($delay > 0) {
+            $delay = max(
+                $delay,
+                ApiException::retrySeconds($response->headers['retry-after'] ?? null)
+            );
+            throw new ApiException($response->status, 'rate_limit', retryAfter: $delay);
+        }
         if (
             $response->status < 200 ||
             $response->status >= 300 ||
@@ -331,7 +387,11 @@ class BotApi extends AbstractBotApi
                 ($data['code'] ?? '') === 'attachment.not.ready'
                     ? 'attachment.not.ready'
                     : 'api_error';
-            $blocked = in_array($data['code'] ?? '', ['bot.blocked', 'user.blocked'], true);
+            $blocked = in_array(
+                $data['code'] ?? '',
+                ['bot.blocked', 'user.blocked', 'chat.blocked', 'chat.denied'],
+                true
+            );
             $this->log('MAX API rejected request', [
                 'status' => $response->status,
                 'shape' => \diBot\BodyShape::describe($body),

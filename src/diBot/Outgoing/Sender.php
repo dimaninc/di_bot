@@ -3,6 +3,7 @@ namespace diBot\Outgoing;
 
 use diBot\AbstractBotApi;
 use diBot\Keyboard;
+use diBot\Exception\{ApiException, MediaNotReadyException};
 
 readonly final class Sender
 {
@@ -15,7 +16,8 @@ readonly final class Sender
         string $text,
         ?\Closure $mediaFactory = null,
         ?Keyboard $keyboard = null,
-        ?string $fallbackText = null
+        ?string $fallbackText = null,
+        bool $fallbackWhenBlocked = true
     ): array {
         if ($this->mediaEnabled && $mediaFactory !== null) {
             try {
@@ -36,6 +38,16 @@ readonly final class Sender
                     }
                     $this->api->log('Media refused', ['reason' => $decision->reason]);
                 }
+            } catch (ApiException $e) {
+                if (
+                    $e instanceof MediaNotReadyException ||
+                    $e->isDeliveryUncertain() ||
+                    $e->rateLimitDelay() > 0 ||
+                    (!$fallbackWhenBlocked && $e->blocked)
+                ) {
+                    throw $e;
+                }
+                $this->api->log('Media send rejected');
             } catch (\Throwable) {
                 $this->api->log('Media send failed');
             }

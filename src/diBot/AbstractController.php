@@ -1,6 +1,8 @@
 <?php
 namespace diBot;
 
+use diBot\Exception\ApiException;
+
 abstract class AbstractController
 {
     public function __construct(protected AbstractBotApi $api)
@@ -72,9 +74,35 @@ abstract class AbstractController
                 break;
             }
             $started = microtime(true);
-            $result = $this->api->getUpdates($cursor);
+            for ($retry = 0; ; $retry++) {
+                try {
+                    $result = $this->api->getUpdates($cursor);
+                    break;
+                } catch (ApiException $e) {
+                    // Повторяем только чтение, позиция и счётчик пачек не меняются.
+                    if (
+                        ($e->reason !== 'network_error' && $e->rateLimitDelay() === 0) ||
+                        $retry >= 3
+                    ) {
+                        throw $e;
+                    }
+                    $this->api->log('Polling temporarily unavailable; retrying');
+                    if ($shouldContinue !== null && !$shouldContinue()) {
+                        return;
+                    }
+                    $this->pollingPause($e->rateLimitDelay() ?: 1 << $retry);
+                    if ($shouldContinue !== null && !$shouldContinue()) {
+                        return;
+                    }
+                }
+            }
             foreach ($result->updates as $update) {
-                $this->handle($update);
+                try {
+                    $this->handle($update);
+                } catch (\Throwable) {
+                    // Как в вебхуке: одно неисправное событие не блокирует следующие.
+                    $this->api->log('Polling update processing failed; skipped');
+                }
             }
             $store->save($result->cursor);
             $cursor = $result->cursor;
@@ -82,5 +110,9 @@ abstract class AbstractController
                 usleep(100000);
             }
         }
+    }
+    protected function pollingPause(int $seconds): void
+    {
+        sleep($seconds);
     }
 }
