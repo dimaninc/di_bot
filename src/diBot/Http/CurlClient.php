@@ -89,13 +89,12 @@ final class CurlClient implements Client
                     $status,
                     $tooLarge
                         ? 'response_too_large'
-                        : (in_array(
-                            curl_errno($ch),
-                            [CURLE_PEER_FAILED_VERIFICATION, CURLE_SSL_CERTPROBLEM],
-                            true
-                        )
-                            ? 'tls_untrusted_ca'
-                            : 'network_error')
+                        : match (curl_errno($ch)) {
+                            CURLE_SSL_CACERT => 'tls_untrusted_ca',
+                            CURLE_SSL_CACERT_BADFILE => 'tls_ca_file',
+                            CURLE_SSL_CERTPROBLEM => 'tls_client_certificate',
+                            default => 'network_error',
+                        }
                 );
             }
             return new Response($status, $body, $headers);

@@ -52,9 +52,23 @@ class BotApi extends AbstractBotApi
             throw new \diBot\Exception\DownloadException(
                 $e->httpStatus,
                 $e->reason,
-                in_array($e->httpStatus, [400, 404], true),
+                in_array($e->httpStatus, [400, 404], true) ||
+                    in_array(
+                        $e->reason,
+                        [
+                            'invalid_token',
+                            'disabled',
+                            'tls_untrusted_ca',
+                            'tls_ca_file',
+                            'tls_client_certificate',
+                            'response_too_large',
+                        ],
+                        true
+                    ),
                 $e->retryAfter
             );
+        } catch (\InvalidArgumentException) {
+            throw new \diBot\Exception\DownloadException(0, 'invalid_configuration', true);
         }
         $path = $meta['result']['file_path'] ?? null;
         // Кодируем сегменты отдельно: file_path не может сменить хост или выйти из /file/.
@@ -132,7 +146,7 @@ class BotApi extends AbstractBotApi
         );
         return $this->request(
             $media->kind === 'photo' ? 'sendPhoto' : 'sendDocument',
-            [],
+            $body + [$media->kind => $bytes],
             $multipart,
             $type
         );
@@ -207,14 +221,17 @@ class BotApi extends AbstractBotApi
         }
         $updates = [];
         $next = $cursor;
+        $invalidId = false;
         foreach ($result['result'] as $raw) {
             if (
                 !is_array($raw) ||
-                !isset($raw['update_id']) ||
+                (!is_int($raw['update_id'] ?? null) && !is_string($raw['update_id'] ?? null)) ||
                 !ctype_digit((string) $raw['update_id']) ||
                 strlen((string) $raw['update_id']) > 15
             ) {
-                throw new ApiException(200, 'invalid_update_id');
+                $invalidId = true;
+                $this->log('Invalid Telegram update ID skipped');
+                continue;
             }
             $candidate = (string) ((int) $raw['update_id'] + 1);
             if ($next === null || (int) $candidate > (int) $next) {
@@ -224,6 +241,10 @@ class BotApi extends AbstractBotApi
             if ($update !== null) {
                 $updates[] = $update;
             }
+        }
+        // Без пригодного ID нельзя вычислить offset, не рискуя потерять чужие события.
+        if ($invalidId && $next === $cursor) {
+            throw new ApiException(200, 'invalid_update_id');
         }
         return new PollBatch($updates, $next);
     }

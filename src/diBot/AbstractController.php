@@ -14,7 +14,7 @@ abstract class AbstractController
     {
     }
 
-    /** $secret – значение заголовка Telegram или уже декодированный сегмент URL MAX. */
+    /** $secret – значение X-Telegram-Bot-Api-Secret-Token или X-Max-Bot-Api-Secret. */
     public function webhook(string $rawBody, string $secret): array
     {
         try {
@@ -80,10 +80,7 @@ abstract class AbstractController
                     break;
                 } catch (ApiException $e) {
                     // Повторяем только чтение, позиция и счётчик пачек не меняются.
-                    if (
-                        ($e->reason !== 'network_error' && $e->rateLimitDelay() === 0) ||
-                        $retry >= 3
-                    ) {
+                    if ((!$e->isDeliveryUncertain() && $e->rateLimitDelay() === 0) || $retry >= 3) {
                         throw $e;
                     }
                     $this->api->log('Polling temporarily unavailable; retrying');

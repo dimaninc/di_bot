@@ -16,6 +16,11 @@ final class Update extends AbstractUpdate
         $recipient = is_array($msg['recipient'] ?? null) ? $msg['recipient'] : [];
         $u->messageId = self::string($body['mid'] ?? '');
         if ($type === 'bot_started') {
+            $timestamp = self::string($data['timestamp'] ?? '');
+            // Для старта нет message/callback ID; без timestamp дедупликация неоднозначна.
+            if ($timestamp === '' || !ctype_digit($timestamp)) {
+                return null;
+            }
             $user = $data['user'] ?? [];
             $u->chatId = self::string($data['chat_id'] ?? '');
             $u->isPrivateChat = true;

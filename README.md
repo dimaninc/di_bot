@@ -2,15 +2,9 @@
 
 PHP 8.3 transport for Telegram and MAX. No database, environment lookup, or CMS dependency.
 
-```bash
-composer require dimaninc/di_bot:^0.2
-```
-
-Until Packagist registration, add the VCS repository to the consuming project:
-
-```json
-{"repositories":[{"type":"vcs","url":"https://github.com/dimaninc/di_bot"}]}
-```
+The first release is pending review and merge. No released version is available yet.
+For development, check out the pull-request branch and run `composer install`.
+Applications should pin a published version after the first release.
 
 ## Send a message
 
@@ -55,7 +49,10 @@ fallback text, even if the failure happened before the final send. This conserva
 rule avoids duplicate messages when a successful send loses its response.
 Rate limits and `MediaNotReadyException` also propagate without text fallback.
 `send(..., fallbackWhenBlocked: false)` rethrows blocked-chat errors instead of trying
-text in the same chat; the default is `true`. Set `mediaEnabled: false` on `Sender`
+text in the same chat; the default is `true` to allow text when media permissions differ.
+Use `false` for deliveries where a second request is unwanted. A media 403 alone must
+not be treated as proof that a user stopped the bot, especially in groups.
+Set `mediaEnabled: false` on `Sender`
 to skip the media factory. Photo and document are supported. `sendFileId()` reuses a
 Telegram file ID or a MAX token; storing these identifiers belongs to the application.
 
@@ -78,7 +75,10 @@ Never log the file ID or signed download URLs.
 
 `editMessage(..., keyboard: null)` and an empty `Keyboard` remove existing buttons.
 Use `isCaption: true` for messages with media: MAX first reads and retains non-keyboard
-attachments, then replaces the buttons; Telegram edits the caption. With no media,
+photo/document tokens, then replaces the buttons; Telegram edits the caption.
+MAX response-only fields (`photo_id`, `url`) are not echoed into the edit request.
+Malformed attachments, missing tokens and unsupported media abort before PUT so an
+edit cannot silently delete them. With no media,
 MAX removes buttons using `attachments: []`, not an empty keyboard attachment.
 
 ## Incoming attachments
@@ -117,14 +117,21 @@ returned in memory; the library does not write them to disk or update database r
 Expired MAX URLs (403/404/410), invalid URLs and oversized bodies are permanent download
 errors. Network errors, empty responses, partial responses and HTTP 5xx are retryable;
 a caller should bound retries. `Download::mime` is the HTTP Content-Type, not a guarantee
-that bytes are safe to serve inline.
+that bytes are safe to serve inline. A 3xx without a usable Location, including 304,
+is a temporary `invalid_redirect`, not a permanently blocked URL. TLS configuration
+failures are permanent until configuration is corrected. Telegram configuration errors
+raised during `getFile` are wrapped in `DownloadException` (`invalid_configuration`).
 
 ## Blocked chats and rate limits
 
 MAX `chat.denied`, `chat.blocked`, `bot.blocked` and `user.blocked` set `ApiException::blocked`.
 Free-form MAX error text and arbitrary codes containing `block` do not. Telegram 403
 sets this flag for forbidden chats, including blocked/deactivated users; it is a delivery
-restriction, not proof of a particular user action.
+restriction, not proof of a particular user action. `chat.denied` is an empirical code;
+the other three MAX codes are compatibility assumptions without live confirmation.
+These codes and `too.many.requests` are not guaranteed by the published MAX reference.
+Unit fixtures verify classification only; HTTP 429 remains the documented rate-limit
+signal independently of the string code. An unknown code is an ordinary API error.
 
 `$api->rateLimitDelay($response, $httpStatus)` classifies raw platform responses;
 callers using the API normally read `$exception->rateLimitDelay()`. Telegram's
@@ -133,7 +140,10 @@ MAX `too.many.requests` use a one-second minimum when no valid delay is supplied
 Send operations and downloads never sleep or retry automatically on rate limits:
 workers should reschedule after that delay. `Sender` does not immediately try text.
 MAX `answerCallback($id)` with an empty notification is a successful no-op (`['ok'=>true]`);
-a nonempty notification still calls `/answers`.
+a nonempty notification still calls `/answers`. The no-op is a local result, not an
+acknowledgement from MAX. Its effect on client loading indicators needs live acceptance.
+The reference describes notifications but currently omits the `notification` field from
+its request schema; the SDK exposes it. Validate both paths on supported MAX clients.
 
 ## Updates and webhooks
 
@@ -141,12 +151,27 @@ a nonempty notification still calls `/answers`.
 or `null` for unsupported data. IDs are strings, commands include `/start` payload and
 an optional `commandTarget` from `/command@BotName`. The application filters addressed
 commands, group chats, and duplicate events. MAX deduplication IDs use message/callback
-identity, not a timestamp alone. `bot_started` maps to `start`.
+identity, not a timestamp alone. `bot_started` maps to `start`; a missing/invalid
+timestamp makes that event malformed
+and it is ignored, rather than assigning all starts the same deduplication ID.
+MAX has no documented locale in User: `userProfile['language']` is empty when absent.
+Do not assume TamTam's `user_locale` field exists in MAX or overwrite a known language
+with this empty value.
 
 Extend `AbstractController` and implement `handle(AbstractUpdate $update): void`.
 Call `emitWebhook($rawBody, $suppliedSecret)` to emit HTTP 200 and `{"ok":true}`.
 Use `webhook()` instead when your framework owns the HTTP response. The application
-extracts Telegram's `X-Telegram-Bot-Api-Secret-Token` header or MAX's secret URL segment.
+extracts Telegram's `X-Telegram-Bot-Api-Secret-Token` or MAX's
+`X-Max-Bot-Api-Secret` header and passes its value as `$suppliedSecret`.
+`setWebhook()` requires `Config::webhookSecret`: Telegram accepts 1–256 and MAX 5–256
+ASCII letters, digits, underscores or hyphens. MAX sends it as `secret` in the subscription
+body. Do not embed the secret in the endpoint URL.
+
+MAX `setWebhook()` sends POST for the requested URL; it does not itself delete
+other subscriptions. Automatic replacement is not assumed. When intentionally replacing all
+endpoints, call `deleteWebhook()` before `setWebhook($newUrl)`; this removes all current
+subscriptions and creates a delivery gap if registration fails. Verify subscriptions
+via GET `/subscriptions` after changing the URL.
 Empty token or webhook secret disables processing. Comparison uses `hash_equals`.
 Malformed JSON, handler exceptions, and logger failures still acknowledge the webhook.
 
@@ -154,7 +179,12 @@ The hosting entry point must also guard failures **before the controller is cons
 including environment parsing and database bootstrap. The package cannot intercept them.
 No raw payload values, tokens, API error descriptions, or exception messages are logged.
 `ApiException` exposes HTTP status, a bounded reason and a conservative blocked flag;
-its message contains no third-party response text.
+its message contains no third-party response text. Known HTTP-client reasons survive
+`exchange()`: `tls_untrusted_ca` (cURL 60), `tls_ca_file` (77),
+`tls_client_certificate` (58), `response_too_large`, `curl_init`, `network_error`.
+Unknown client exceptions/reasons are scrubbed to `network_error`, with no previous
+exception. Logs include the safe reason and HTTP status; TLS setup failures are not
+retried by polling.
 
 ## Polling
 
@@ -167,12 +197,16 @@ It saves the platform cursor after attempting every update in the batch. Handler
 exceptions are logged without message text and skipped, matching the webhook policy;
 later updates continue. Persist any required retries inside the handler before returning. A crash
 before checkpointing may redeliver events: the application still needs deduplication.
-Telegram advances to `last update_id + 1`; MAX uses the response `marker` unchanged.
+Telegram advances to `max(valid update_id) + 1`; MAX uses the response `marker` unchanged.
+Malformed Telegram IDs are logged without payload and skipped when valid IDs allow
+progress. A malformed batch with no advancing valid ID fails with `invalid_update_id`:
+there is no safe offset to infer; repair the upstream response before restarting.
+Malformed MAX entries are skipped using the independently supplied marker.
 An empty MAX batch may omit `marker` or return null: the stored cursor stays unchanged.
 A nonempty batch without a marker fails rather than silently losing position.
-Store errors stop the loop. Network errors and rate limits in `getUpdates()` receive
-at most three retries per batch: 1/2/4 seconds for network errors, or the platform delay
-for rate limits. Retries reuse the same cursor and do not consume `maxBatches`. After
+Store errors stop the loop. Network errors, HTTP 5xx, invalid JSON and rate limits in
+`getUpdates()` receive at most three retries per batch: 1/2/4 seconds for uncertain
+responses, or the platform delay for rate limits. Retries reuse the same cursor and do not consume `maxBatches`. After
 the budget is exhausted the exception propagates with the cursor unchanged. API
 rejections and setup errors (webhook removal, initial prompt) are not retried. An optional `shouldContinue` closure and finite
 `maxBatches` allow graceful termination. Override `pollingStarted()` to send a test prompt
@@ -180,9 +214,9 @@ once polling has removed webhooks. Use a separate test bot: polling removes its 
 
 MAX documents polling as a development/testing interface; use webhooks for production.
 
-## Migrating from 0.1
+## Application integration
 
-Update the Composer constraint to `^0.2`. Handle `MediaNotReadyException` and rate-limit
+Handle `MediaNotReadyException` and rate-limit
 exceptions where media is sent; they no longer trigger an immediate text fallback.
 Polling now skips handler failures, and custom `AbstractBotApi` subclasses must implement
 `downloadAttachment()` and `rateLimitDelay()`. Custom HTTP clients should honor
@@ -210,13 +244,18 @@ composer validate --strict
 ```
 
 Tests use synthetic fixtures and a fake HTTP boundary: no live API or secrets are needed.
-Certificate tests pin the three roots and fail 90 days before expiry. Runtime smoke tests
-with real buttons remain the responsibility of consuming applications.
+Certificate tests pin the three roots and fail 90 days before expiry.
+For an optional credential-free network check, run `php scripts/curl-smoke.php`:
+it uses real libcurl, checks the connected peer against CURLOPT_RESOLVE and sets an
+unreachable environment proxy to verify that CDN requests bypass it. It only makes
+HEAD requests and does not validate file upload or download contents.
+Live bot checks are listed in [ACCEPTANCE.md](ACCEPTANCE.md).
 
 Sources checked on 2026-09-28: [Telegram Bot API](https://core.telegram.org/bots/api),
 [MAX overview](https://dev.max.ru/docs-api),
 [MAX uploads](https://dev.max.ru/docs-api/methods/POST/uploads),
 [MAX polling](https://dev.max.ru/docs-api/methods/GET/updates),
+[MAX webhook registration](https://dev.max.ru/docs-api/methods/POST/subscriptions),
 [MAX webhook removal](https://dev.max.ru/docs-api/methods/DELETE/subscriptions),
 [MAX message editing](https://dev.max.ru/docs-api/methods/PUT/messages),
 [MAX callback answers](https://dev.max.ru/docs-api/methods/POST/answers).

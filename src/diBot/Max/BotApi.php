@@ -70,13 +70,33 @@ class BotApi extends AbstractBotApi
         $attachments = [];
         if ($isCaption) {
             $message = $this->request('GET', '/messages/' . rawurlencode($messageId));
-            foreach ($message['body']['attachments'] ?? [] as $attachment) {
-                if (($attachment['type'] ?? '') !== 'inline_keyboard') {
-                    $attachments[] = [
-                        'type' => $attachment['type'],
-                        'payload' => $attachment['payload'],
-                    ];
+            $existing = $message['body']['attachments'] ?? null;
+            if (!is_array($existing) || !array_is_list($existing)) {
+                throw new ApiException(200, 'invalid_attachments');
+            }
+            foreach ($existing as $attachment) {
+                if (!is_array($attachment) || !is_string($attachment['type'] ?? null)) {
+                    throw new ApiException(200, 'invalid_attachments');
                 }
+                if ($attachment['type'] === 'inline_keyboard') {
+                    continue;
+                }
+                // GET и PUT имеют разные схемы: переносим только токен фото/документа.
+                if (!in_array($attachment['type'], ['image', 'file'], true)) {
+                    throw new ApiException(200, 'unsupported_attachment');
+                }
+                $payload = $attachment['payload'] ?? null;
+                if (
+                    !is_array($payload) ||
+                    !is_string($payload['token'] ?? null) ||
+                    $payload['token'] === ''
+                ) {
+                    throw new ApiException(200, 'invalid_attachments');
+                }
+                $attachments[] = [
+                    'type' => $attachment['type'],
+                    'payload' => ['token' => $payload['token']],
+                ];
             }
         }
         return $this->request('PUT', '/messages', $this->body($text, $keyboard, $attachments), [
@@ -253,8 +273,12 @@ class BotApi extends AbstractBotApi
     public function setWebhook(string $url): array
     {
         Config::assertHttpsUrl($url);
+        if (!preg_match('/^[a-zA-Z0-9_-]{5,256}$/D', $this->config->webhookSecret)) {
+            throw new \InvalidArgumentException('MAX webhook secret is missing or invalid');
+        }
         return $this->request('POST', '/subscriptions', [
             'url' => $url,
+            'secret' => $this->config->webhookSecret,
             'update_types' => ['message_created', 'message_callback', 'bot_started'],
         ]);
     }
@@ -308,7 +332,8 @@ class BotApi extends AbstractBotApi
         $updates = [];
         foreach ($result['updates'] as $raw) {
             if (!is_array($raw)) {
-                throw new ApiException(200, 'invalid_update');
+                $this->log('Invalid MAX update skipped');
+                continue;
             }
             $update = Update::fromArray($raw);
             if ($update !== null) {

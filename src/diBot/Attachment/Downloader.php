@@ -51,6 +51,8 @@ final class Downloader
                 $reason = match ($e->reason) {
                     'response_too_large' => 'too_big',
                     'tls_untrusted_ca' => 'tls_untrusted_ca',
+                    'tls_ca_file' => 'tls_ca_file',
+                    'tls_client_certificate' => 'tls_client_certificate',
                     default => 'network_error',
                 };
                 throw new DownloadException($e->httpStatus, $reason, $reason !== 'network_error');
@@ -59,6 +61,12 @@ final class Downloader
             }
             $status = $response->status;
             if ($status >= 300 && $status < 400) {
+                if (
+                    !in_array($status, [301, 302, 303, 307, 308], true) ||
+                    empty($response->headers['location'])
+                ) {
+                    throw new DownloadException($status, 'invalid_redirect', false);
+                }
                 if (!$publicUrl) {
                     throw new DownloadException($status, 'redirect_refused', false);
                 }

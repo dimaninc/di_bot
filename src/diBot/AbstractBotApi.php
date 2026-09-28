@@ -83,6 +83,24 @@ abstract class AbstractBotApi
         }
         try {
             return $this->http->send($request);
+        } catch (ApiException $e) {
+            // Клиент подменяемый: сохраняем только известные безопасные классификации.
+            $reason = in_array(
+                $e->reason,
+                [
+                    'curl_init',
+                    'network_error',
+                    'response_too_large',
+                    'tls_untrusted_ca',
+                    'tls_ca_file',
+                    'tls_client_certificate',
+                ],
+                true
+            )
+                ? $e->reason
+                : 'network_error';
+            $this->log('Bot transport failed', ['reason' => $reason, 'status' => $e->httpStatus]);
+            throw new ApiException($e->httpStatus, $reason);
         } catch (\Throwable) {
             // Не передаём исходное исключение: URL cURL может содержать токен.
             $this->log('Bot transport failed');

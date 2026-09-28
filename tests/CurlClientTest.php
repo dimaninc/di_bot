@@ -18,6 +18,9 @@ namespace diBot\Http {
         if (!\diBot\Tests\CurlProbe::$active) {
             return \curl_exec($handle);
         }
+        if (\diBot\Tests\CurlProbe::$errno !== 0) {
+            return false;
+        }
         $header = \diBot\Tests\CurlProbe::$options[CURLOPT_HEADERFUNCTION];
         foreach (\diBot\Tests\CurlProbe::$headers as $line) {
             if ($header($handle, $line) !== strlen($line)) {
@@ -36,6 +39,12 @@ namespace diBot\Http {
     {
         return \diBot\Tests\CurlProbe::$active ? 200 : \curl_getinfo($handle, $option);
     }
+    function curl_errno($handle): int
+    {
+        return \diBot\Tests\CurlProbe::$active
+            ? \diBot\Tests\CurlProbe::$errno
+            : \curl_errno($handle);
+    }
 }
 namespace diBot\Tests {
     final class CurlProbe
@@ -44,6 +53,7 @@ namespace diBot\Tests {
         public static array $options = [];
         public static array $headers = [];
         public static array $chunks = ['{"ok":true}'];
+        public static int $errno = 0;
     }
     final class CurlClientTest extends \PHPUnit\Framework\TestCase
     {
@@ -53,6 +63,7 @@ namespace diBot\Tests {
             CurlProbe::$options = [];
             CurlProbe::$headers = [];
             CurlProbe::$chunks = ['{"ok":true}'];
+            CurlProbe::$errno = 0;
         }
         protected function tearDown(): void
         {
@@ -139,6 +150,28 @@ namespace diBot\Tests {
             (new \diBot\Http\CurlClient())->send(
                 new \diBot\Http\Request('GET', 'https://127.0.0.1/file', publicDownload: true)
             );
+        }
+        public function testTlsErrorCodesKeepTheirDistinctMeaning(): void
+        {
+            foreach (
+                [
+                    CURLE_SSL_CACERT => 'tls_untrusted_ca',
+                    CURLE_SSL_CACERT_BADFILE => 'tls_ca_file',
+                    CURLE_SSL_CERTPROBLEM => 'tls_client_certificate',
+                    CURLE_OPERATION_TIMEDOUT => 'network_error',
+                ]
+                as $errno => $reason
+            ) {
+                CurlProbe::$errno = $errno;
+                try {
+                    (new \diBot\Http\CurlClient())->send(
+                        new \diBot\Http\Request('GET', 'https://api.example/')
+                    );
+                    self::fail();
+                } catch (\diBot\Exception\ApiException $e) {
+                    self::assertSame($reason, $e->reason);
+                }
+            }
         }
     }
 }
