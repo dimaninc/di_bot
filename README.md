@@ -101,7 +101,8 @@ an image (a HEIC or TIFF sent as a file is not shown as a photo). Telegram selec
 largest photo variant; MAX preserves the temporary CDN URL. Callback updates never expose
 the old message's attachments as new uploads. Names, MIME and reported sizes in updates
 are untrusted metadata; `KindResolver` provides descriptive labels by MIME or extension
-when an application wants one.
+when an application wants one. It is not a send kind: do not pass its result to
+`sendFileId()` or `Media::kind` (a file labelled `photo` would go as a photo and fail).
 
 ```php
 use diBot\Exception\DownloadException;
@@ -247,9 +248,11 @@ Subscribed update types live in one constant per platform, used by both `setWebh
 and `getUpdates()`: `Telegram\BotApi::UPDATE_TYPES` (`message`, `callback_query`,
 `my_chat_member`) and `Max\BotApi::UPDATE_TYPES` (`message_created`,
 `message_callback`, `bot_started`, `bot_stopped`). Existing webhooks keep their old list
-until `setWebhook()` is called again. Telegram `setWebhook()` also sets
-`max_connections = 1`: updates of a bot are delivered one at a time, so two updates of one
-chat cannot be reordered by parallel connections.
+until `setWebhook()` is called again. `Config(webhookMaxConnections: 1)` makes Telegram
+deliver updates of a bot one at a time, so two updates of one chat cannot be reordered by
+parallel connections; the price is that one slow update delays every chat of the bot (and a
+response slower than Telegram's timeout is retried). Without it Telegram's default (40)
+applies.
 
 MAX `setWebhook()` sends POST for the requested URL; it does not itself delete
 other subscriptions. Automatic replacement is not assumed. `deleteWebhook($url)` validates

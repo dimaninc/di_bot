@@ -161,7 +161,6 @@ final class Update extends AbstractUpdate
             !is_array($message['animation'] ?? null)
         ) {
             $mime = self::string($document['mime_type'] ?? '');
-            $name = self::string($document['file_name'] ?? '');
             $result[] = self::attachment(
                 $document,
                 // Вид – как отправлено: картинка файлом (HEIC, TIFF) – документ, а не фото.
