@@ -10,6 +10,7 @@ final class Update extends AbstractUpdate
     {
         $u = new self();
         $u->platform = Platform::Max;
+        $u->raw = $data;
         $type = $data['update_type'] ?? '';
         $msg = is_array($data['message'] ?? null) ? $data['message'] : [];
         $body = is_array($msg['body'] ?? null) ? $msg['body'] : [];

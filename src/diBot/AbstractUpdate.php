@@ -7,6 +7,12 @@ abstract class AbstractUpdate
     public const MEMBERSHIP_STARTED = 'started';
 
     public Platform $platform;
+    /**
+     * Исходный апдейт площадки как есть: приложению, которое хранит апдейты (очередь,
+     * разбор инцидентов), он нужен и при опросе, где сырого ответа у него нет. Содержит
+     * данные пользователя и ссылки на файлы – в журнал не писать.
+     */
+    public array $raw = [];
     public string $updateId = '';
     public string $userId = '';
     public string $chatId = '';

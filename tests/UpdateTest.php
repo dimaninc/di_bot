@@ -328,6 +328,13 @@ final class UpdateTest extends TestCase
         self::assertTrue($u->isCallback());
         self::assertSame([], $u->otherContent);
     }
+    public function testRawKeepsTheSourceUpdate(): void
+    {
+        self::assertSame(self::telegram(), Telegram::fromArray(self::telegram())->raw);
+        self::assertSame(self::max(), Max::fromArray(self::max())->raw);
+        $membership = self::telegramMembership('kicked');
+        self::assertSame($membership, Telegram::fromArray($membership)->raw);
+    }
     public function testMalformedUpdatesAreIgnored(): void
     {
         foreach (
