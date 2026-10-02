@@ -196,6 +196,122 @@ final class TransportTest extends TestCase
             $http->requests[1]->url
         );
         self::assertCount(3, $http->requests);
+        self::assertSame('GET', $http->requests[0]->method);
+        self::assertStringContainsString('two', $http->requests[2]->url);
+    }
+    public function testMaxDeleteOwnSubscriptionOnly(): void
+    {
+        $own = 'https://example.com/hook?bot=1';
+        $list = FakeClient::json([
+            'subscriptions' => [['url' => 'https://other.example/hook'], ['url' => $own]],
+        ]);
+        $http = new FakeClient([$list, FakeClient::json(['success' => true])]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(2, $http->requests, 'сверка и снятие своей – два запроса');
+        self::assertSame('GET', $http->requests[0]->method);
+        self::assertSame('DELETE', $http->requests[1]->method);
+        self::assertNull($http->requests[1]->body);
+        $query = [];
+        parse_str((string) parse_url($http->requests[1]->url, PHP_URL_QUERY), $query);
+        self::assertSame(['url' => $own], $query, 'чужая подписка цела');
+        self::assertStringStartsWith(
+            Max::DEFAULT_BASE_URL . '/subscriptions?',
+            $http->requests[1]->url
+        );
+        // Адрес в списке дважды – всё равно один DELETE.
+        $http = new FakeClient([
+            FakeClient::json(['subscriptions' => [['url' => $own], ['url' => $own]]]),
+            FakeClient::json(['success' => true]),
+        ]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(2, $http->requests);
+        // Своей нет (уже снята) – ничего не делаем, как Telegram.
+        $http = new FakeClient([
+            FakeClient::json(['subscriptions' => [['url' => 'https://other.example/hook']]]),
+        ]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(1, $http->requests);
+        foreach (
+            ['http://example.com/hook', 'https://u:p@example.com/', 'https://example.com/#x', '']
+            as $url
+        ) {
+            $http = new FakeClient();
+            try {
+                (new Max(new Config('token'), $http))->deleteWebhook($url);
+                self::fail('Invalid URL accepted');
+            } catch (\InvalidArgumentException) {
+                self::assertSame([], $http->requests);
+            }
+        }
+    }
+    public function testTelegramDeleteWebhookRemovesOnlyOwnUrl(): void
+    {
+        $info = fn(string $url) => FakeClient::json(['ok' => true, 'result' => ['url' => $url]]);
+        // Свой адрес – снимается.
+        $http = new FakeClient([
+            $info('https://example.com/x'),
+            FakeClient::json(['ok' => true, 'result' => true]),
+        ]);
+        (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+        self::assertCount(2, $http->requests);
+        self::assertStringEndsWith('/getWebhookInfo', $http->requests[0]->url);
+        self::assertStringEndsWith('/deleteWebhook', $http->requests[1]->url);
+        // Чужой или пустой – вебхук другого сервиса не трогаем.
+        foreach (['https://other.example/hook', ''] as $current) {
+            $http = new FakeClient([$info($current)]);
+            (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+            self::assertCount(1, $http->requests, $current);
+        }
+        // Без адреса – снимается любой, без проверки.
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => true])]);
+        (new Telegram(new Config('123:token'), $http))->deleteWebhook();
+        self::assertCount(1, $http->requests);
+        self::assertStringEndsWith('/deleteWebhook', $http->requests[0]->url);
+        // Битый ответ getWebhookInfo – ошибка, а не молчаливое «не наш».
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => []])]);
+        try {
+            (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+            self::fail('invalid_webhook_info expected');
+        } catch (\diBot\Exception\ApiException $e) {
+            self::assertSame('invalid_webhook_info', $e->reason);
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        $api = new Telegram(new Config('123:token'), new FakeClient());
+        $api->deleteWebhook('http://example.com/x');
+    }
+    public function testUpdateTypesAreSharedByWebhookAndPolling(): void
+    {
+        self::assertSame(['message', 'callback_query', 'my_chat_member'], Telegram::UPDATE_TYPES);
+        self::assertContains('bot_stopped', Max::UPDATE_TYPES);
+        self::assertContains('bot_started', Max::UPDATE_TYPES);
+        $config = new Config('123:token', webhookSecret: 'secret');
+        $http = new FakeClient([
+            FakeClient::json(['ok' => true, 'result' => true]),
+            FakeClient::json(['ok' => true, 'result' => []]),
+        ]);
+        $api = new Telegram($config, $http);
+        $api->setWebhook('https://example.com/hook');
+        $api->getUpdates('1');
+        foreach ($http->requests as $request) {
+            self::assertSame(
+                Telegram::UPDATE_TYPES,
+                json_decode($request->body, true)['allowed_updates']
+            );
+        }
+        $http = new FakeClient([
+            FakeClient::json(['success' => true]),
+            FakeClient::json(['updates' => [], 'marker' => 5]),
+        ]);
+        $api = new Max($config, $http);
+        $api->setWebhook('https://example.com/hook');
+        $api->getUpdates('1');
+        self::assertSame(
+            Max::UPDATE_TYPES,
+            json_decode($http->requests[0]->body, true)['update_types']
+        );
+        $query = [];
+        parse_str((string) parse_url($http->requests[1]->url, PHP_URL_QUERY), $query);
+        self::assertSame(Max::UPDATE_TYPES, explode(',', $query['types']));
     }
     public function testPollingUsesNativeOffsetsAndIgnoresUnsupportedUpdates(): void
     {

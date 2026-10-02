@@ -17,6 +17,8 @@ class BotApi extends AbstractBotApi
     public const BUTTONS_PER_ROW = 8;
     public const BUTTONS_MAX = 100;
     public const ROWS_MAX = 100;
+    // Один список на вебхук и поллинг, чтобы подписки не разошлись.
+    public const UPDATE_TYPES = ['message', 'callback_query', 'my_chat_member'];
 
     public function platform(): Platform
     {
@@ -192,12 +194,29 @@ class BotApi extends AbstractBotApi
         return $this->request('setWebhook', [
             'url' => $url,
             'secret_token' => $this->config->webhookSecret,
-            'allowed_updates' => ['message', 'callback_query'],
+            'allowed_updates' => self::UPDATE_TYPES,
         ]);
     }
 
-    public function deleteWebhook(): void
+    /**
+     * У бота Telegram вебхук один. С $url снимается, только если стоит именно он
+     * (getWebhookInfo, строгое сравнение): иначе «сними мою подписку» снял бы вебхук другого
+     * сервиса, которому бота передали. Без $url – снимается любой. Окно между сверкой и
+     * снятием атомарно не закрыть: у Telegram такого метода нет.
+     */
+    public function deleteWebhook(?string $url = null): void
     {
+        if ($url !== null) {
+            Config::assertHttpsUrl($url);
+            $info = $this->request('getWebhookInfo');
+            $current = $info['result']['url'] ?? null;
+            if (!is_string($current)) {
+                throw new ApiException(200, 'invalid_webhook_info');
+            }
+            if ($current !== $url) {
+                return;
+            }
+        }
         $this->request('deleteWebhook', ['drop_pending_updates' => false]);
     }
 
@@ -212,7 +231,7 @@ class BotApi extends AbstractBotApi
             [
                 'offset' => $cursor ?? '0',
                 'timeout' => $timeout,
-                'allowed_updates' => ['message', 'callback_query'],
+                'allowed_updates' => self::UPDATE_TYPES,
             ],
             timeout: $timeout + $this->config->requestTimeout
         );

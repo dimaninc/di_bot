@@ -16,6 +16,13 @@ class BotApi extends AbstractBotApi
     public const BUTTONS_PER_ROW = 7;
     public const BUTTONS_MAX = 210;
     public const ROWS_MAX = 30;
+    // Один список на вебхук и поллинг, чтобы подписки не разошлись.
+    public const UPDATE_TYPES = [
+        'message_created',
+        'message_callback',
+        'bot_started',
+        'bot_stopped',
+    ];
 
     public function platform(): Platform
     {
@@ -287,22 +294,43 @@ class BotApi extends AbstractBotApi
         return $this->request('POST', '/subscriptions', [
             'url' => $url,
             'secret' => $this->config->webhookSecret,
-            'update_types' => ['message_created', 'message_callback', 'bot_started'],
+            'update_types' => self::UPDATE_TYPES,
         ]);
     }
 
-    public function deleteWebhook(): void
+    public function deleteWebhook(?string $url = null): void
+    {
+        if ($url !== null) {
+            Config::assertHttpsUrl($url);
+        }
+        // С $url – GET и один DELETE своей подписки (повтор адреса в списке не даёт второго
+        // запроса), подписки других сервисов не трогаем; нет её – ничего не делаем (как
+        // Telegram: повторное снятие не ошибка). Без $url – GET и DELETE на каждую подписку.
+        foreach ($this->subscriptionUrls() as $current) {
+            if ($url === null || $current === $url) {
+                $this->request('DELETE', '/subscriptions', query: ['url' => $current]);
+                if ($url !== null) {
+                    return;
+                }
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function subscriptionUrls(): array
     {
         $result = $this->request('GET', '/subscriptions');
         if (!is_array($result['subscriptions'] ?? null)) {
             throw new ApiException(200, 'invalid_subscriptions');
         }
+        $urls = [];
         foreach ($result['subscriptions'] as $sub) {
             if (!is_array($sub) || !is_string($sub['url'] ?? null)) {
                 throw new ApiException(200, 'invalid_subscription');
             }
-            $this->request('DELETE', '/subscriptions', query: ['url' => $sub['url']]);
+            $urls[] = $sub['url'];
         }
+        return $urls;
     }
 
     public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch
@@ -314,7 +342,7 @@ class BotApi extends AbstractBotApi
         $query = [
             'limit' => 100,
             'timeout' => $timeout,
-            'types' => 'message_created,message_callback,bot_started',
+            'types' => implode(',', self::UPDATE_TYPES),
         ];
         if ($cursor !== null) {
             $query['marker'] = $cursor;

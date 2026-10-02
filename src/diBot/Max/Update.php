@@ -15,18 +15,26 @@ final class Update extends AbstractUpdate
         $body = is_array($msg['body'] ?? null) ? $msg['body'] : [];
         $recipient = is_array($msg['recipient'] ?? null) ? $msg['recipient'] : [];
         $u->messageId = self::string($body['mid'] ?? '');
-        if ($type === 'bot_started') {
+        if ($type === 'bot_started' || $type === 'bot_stopped') {
             $timestamp = self::string($data['timestamp'] ?? '');
-            // Для старта нет message/callback ID; без timestamp дедупликация неоднозначна.
+            // У старта/остановки нет message/callback ID; без timestamp дедупликация неоднозначна.
             if ($timestamp === '' || !ctype_digit($timestamp)) {
                 return null;
             }
             $user = $data['user'] ?? [];
             $u->chatId = self::string($data['chat_id'] ?? '');
             $u->isPrivateChat = true;
-            $u->text = '/start';
-            $u->command = 'start';
-            $u->commandPayload = self::string($data['payload'] ?? '');
+            if ($type === 'bot_started') {
+                // По справочнику MAX – «впервые начал общение или возобновил после остановки»,
+                // то есть это /start, а не событие членства: membership не ставим. Иначе
+                // обработчик, пропускающий события членства, терял бы каждый /start с
+                // payload. Возврат после остановки на MAX виден только так.
+                $u->text = '/start';
+                $u->command = 'start';
+                $u->commandPayload = self::string($data['payload'] ?? '');
+            } else {
+                $u->membership = self::MEMBERSHIP_STOPPED;
+            }
         } elseif ($type === 'message_created' || $type === 'message_callback') {
             $callback = is_array($data['callback'] ?? null) ? $data['callback'] : [];
             $user = $type === 'message_callback' ? $callback['user'] ?? [] : $msg['sender'] ?? [];
@@ -42,7 +50,10 @@ final class Update extends AbstractUpdate
             } else {
                 $u->text = self::string($body['text'] ?? '');
                 $u->parseCommand();
-                $u->attachments = self::parseAttachments($body['attachments'] ?? []);
+                [$u->attachments, $other] = self::parseAttachments($body['attachments'] ?? []);
+                foreach ($other as $kind) {
+                    $u->addOtherContent($kind);
+                }
                 if ($u->messageId === '') {
                     return null;
                 }
@@ -63,14 +74,29 @@ final class Update extends AbstractUpdate
         $u->updateId = hash('sha256', $type . ':' . $identity);
         return $u->chatId !== '' && $u->userId !== '' ? $u : null;
     }
+
+    /**
+     * Один проход: image и file с токеном или ссылкой – в attachments, остальное – виды для
+     * otherContent (так не держим два списка «обрабатываемых» типов). image/file без токена и
+     * ссылки – other: иначе сообщение пришло бы пустым. Отдельного типа voice в схеме MAX
+     * нет: голосовое, вероятно, приходит как audio (живьём не проверено), поэтому audio не
+     * переименовываем. share и неизвестные – other.
+     *
+     * @return array{0: list<\diBot\Attachment\Attachment>, 1: list<string>}
+     */
     private static function parseAttachments(mixed $attachments): array
     {
         $result = [];
+        $other = [];
         foreach (is_array($attachments) ? $attachments : [] as $attachment) {
-            if (
-                !is_array($attachment) ||
-                !in_array($attachment['type'] ?? '', ['image', 'file'], true)
-            ) {
+            $type = is_array($attachment) ? $attachment['type'] ?? null : null;
+            // Битый элемент (не объект, без строкового type) – не содержимое собеседника.
+            if (!is_string($type) || $type === 'inline_keyboard') {
+                continue;
+            }
+            if ($type !== 'image' && $type !== 'file') {
+                $known = ['audio', 'video', 'sticker', 'location', 'contact'];
+                $other[] = in_array($type, $known, true) ? $type : 'other';
                 continue;
             }
             $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
@@ -78,6 +104,7 @@ final class Update extends AbstractUpdate
                 self::string($payload['token'] ?? '') ?: self::string($payload['photo_id'] ?? '');
             $url = self::string($payload['url'] ?? '');
             if ($ref === '' && $url === '') {
+                $other[] = 'other';
                 continue;
             }
             $name =
@@ -88,15 +115,13 @@ final class Update extends AbstractUpdate
                 $size = is_int($payload['size'] ?? null) ? max(0, $payload['size']) : 0;
             }
             $result[] = new \diBot\Attachment\Attachment(
-                $attachment['type'] === 'image'
-                    ? 'photo'
-                    : \diBot\Attachment\KindResolver::resolve('', $name),
+                $type === 'image' ? 'photo' : \diBot\Attachment\KindResolver::resolve('', $name),
                 $ref,
                 $url,
                 size: $size,
                 filename: $name
             );
         }
-        return $result;
+        return [$result, $other];
     }
 }

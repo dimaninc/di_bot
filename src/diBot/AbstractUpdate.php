@@ -3,6 +3,9 @@ namespace diBot;
 
 abstract class AbstractUpdate
 {
+    public const MEMBERSHIP_STOPPED = 'stopped';
+    public const MEMBERSHIP_STARTED = 'started';
+
     public Platform $platform;
     public string $updateId = '';
     public string $userId = '';
@@ -18,6 +21,19 @@ abstract class AbstractUpdate
     public array $userProfile = [];
     /** @var list<\diBot\Attachment\Attachment> */
     public array $attachments = [];
+    /**
+     * Виды содержимого, которое библиотека не отдаёт в attachments: voice, audio, video,
+     * video_note, sticker, animation, location, contact, poll, other. Только виды, без
+     * ссылок на файлы; порядок появления, без повторов.
+     * @var list<string>
+     */
+    public array $otherContent = [];
+    /**
+     * Собеседник остановил (заблокировал) или вернул бота – только в личном чате:
+     * MEMBERSHIP_STOPPED/STARTED; '' – обычный апдейт. Групповые события (бота добавили или
+     * удалили) не отдаются: у MAX их в подписке нет.
+     */
+    public string $membership = '';
 
     public function isCallback(): bool
     {
@@ -36,6 +52,13 @@ abstract class AbstractUpdate
             $this->command = strtolower($m[1]);
             $this->commandTarget = $m[2] ?? '';
             $this->commandPayload = trim($m[3] ?? '');
+        }
+    }
+
+    protected function addOtherContent(string $kind): void
+    {
+        if (!in_array($kind, $this->otherContent, true)) {
+            $this->otherContent[] = $kind;
         }
     }
 

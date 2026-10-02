@@ -64,7 +64,12 @@ abstract class AbstractBotApi
     /** @param list<array{command:string,description:string}> $commands */
     abstract public function setCommands(array $commands): array;
     abstract public function setWebhook(string $url): array;
-    abstract public function deleteWebhook(): void;
+    /**
+     * $url – снять вебхук только с этим адресом (сверка со списком у площадки; нет такого –
+     * ничего не делать), null – снять любой. Сверка и снятие – два запроса, не атомарно:
+     * вебхук, поставленный другим сервисом между ними, тоже может сняться.
+     */
+    abstract public function deleteWebhook(?string $url = null): void;
     abstract public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch;
 
     public function log(string $event, array $context = []): void

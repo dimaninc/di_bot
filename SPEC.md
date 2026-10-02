@@ -66,7 +66,16 @@ src/diBot/
 
 Платформонезависимый апдейт с полями: `updateId`, `platform`, `userId`, `chatId`,
 `isPrivateChat`, `text`, `command`, `commandPayload`, `callbackId`, `payload`,
-`userProfile` (username, имя, фамилия, язык).
+`userProfile` (username, имя, фамилия, язык), `attachments`, `otherContent`, `membership`.
+
+`membership` – апдейт только о присутствии бота в личном чате, без текста и команды:
+`stopped` (Telegram `my_chat_member` – бот был в чате и пропал, MAX `bot_stopped`) или
+`started` (Telegram: не было – появился). Сравниваются старый и новый статусы; групповые
+события не отдаются. MAX `bot_started` – это `/start` (первый контакт или возврат), а не
+событие членства: `membership` у него пустой. `otherContent` – виды содержимого, которое пакет не отдаёт
+вложениями (голосовое, видео, стикер и т. п.; содержимое без своего вида – `other`): только
+вид, без ссылок на файлы.
+Подписка на типы апдейтов – одна константа `UPDATE_TYPES` адаптера на вебхук и polling.
 
 Разбор `/start <payload>` и `/command` делается в базовом классе: deep-link payload
 Telegram отдаёт как аргумент команды, и адаптерам про это знать незачем.

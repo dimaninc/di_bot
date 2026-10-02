@@ -2,9 +2,8 @@
 
 PHP 8.3 transport for Telegram and MAX. No database, environment lookup, or CMS dependency.
 
-The first release is pending review and merge. No released version is available yet.
-For development, check out the pull-request branch and run `composer install`.
-Applications should pin a published version after the first release.
+Releases are git tags (`0.1.0`, `0.2.0`, …); changes and upgrade notes are in the GitHub
+release notes. Applications pin a released version, for example `"dimaninc/di_bot": "^0.2"`.
 
 ## Send a message
 
@@ -170,6 +169,60 @@ MAX has no documented locale in User: `userProfile['language']` is empty when ab
 Do not assume TamTam's `user_locale` field exists in MAX or overwrite a known language
 with this empty value.
 
+`membership` marks an update that only reports the bot's presence in a **private chat**:
+`AbstractUpdate::MEMBERSHIP_STOPPED` (`'stopped'`) – the user stopped (blocked) the bot,
+`MEMBERSHIP_STARTED` (`'started'`) – the user returned it; `''` for every other update.
+Such an update has `chatId`, `userId`, `isPrivateChat` and `userProfile`, but no
+`messageId`, text, command, attachments or callback, so a handler can record it and skip
+replying: replying to a user who has just stopped the bot fails. Group and channel events
+(the bot added or removed by a member) are not reported: MAX has no such events in the
+subscription, and the field would mean different things on the two platforms.
+
+The platforms differ in how a return looks:
+
+- Telegram sends `started` as a separate event (unblocking); a `/start` after it is
+  another, ordinary update. A first contact has no `started` event at all.
+- MAX `bot_started` means "first contact or return after a stop" (MAX reference) and is
+  the `/start` command with its payload, so it has `membership = ''`: a handler that skips
+  membership updates still handles every `/start`. MAX never yields `started`.
+
+Details per platform:
+
+- Telegram `my_chat_member` in a private chat: the event is a change of presence, not of
+  status. `old_chat_member` and `new_chat_member` are compared (present: `member`,
+  `administrator`, `creator`, `restricted` with `is_member: true`); appearing gives
+  `started`, disappearing (`kicked`, `left`) gives `stopped`, anything else is ignored
+  (`null`), as are events without both statuses.
+- MAX `bot_stopped` (present in the MAX reference: the user stopped or deleted the bot;
+  deleting also sends `dialog_removed`, which is not subscribed) maps to `stopped`. It and
+  `bot_started` require a valid timestamp; their deduplication IDs include the event
+  type, so a start and a stop with the same chat, user and timestamp never collide. The
+  `bot_stopped` fields (`chat_id`, `user`, `timestamp`) mirror `bot_started`; the reference
+  page does not list them statically and they are not confirmed live.
+
+Treat any ordinary update from the user as presence too.
+
+`otherContent` lists kinds of message content the library does not expose as
+`attachments`, in order of appearance and without duplicates: `voice`, `audio`, `video`,
+`video_note`, `sticker`, `animation`, `location`, `contact`, `poll`, `other`. It holds
+kinds only, never file references or URLs, and is empty for callbacks. Use it to record
+"voice message, cannot be played" instead of an empty message.
+
+- Telegram: `voice`, `audio`, `video`, `video_note`, `sticker`, `animation`, `location`,
+  `venue` (as `location`), `contact`, `poll`, `dice` (as `other`). An animation also
+  carries `document`; it stays out of `attachments` and is reported once as `animation`.
+  Content without a kind of its own – `story`, `game`, `paid_media`, `invoice`,
+  `giveaway`, `giveaway_winners`, `checklist` – is `other`. The list is explicit: service
+  fields (`new_chat_members`, `pinned_message` and the like) are not content.
+- MAX: attachment types other than `image`, `file` and `inline_keyboard`; `audio`,
+  `video`, `sticker`, `location`, `contact` keep their names, `share` and unknown types
+  become `other`, as do `image` and `file` without a token and URL (nothing to download).
+  Malformed elements (not an object, no string `type`) are skipped: they are not something
+  the user sent.
+  The MAX reference has no separate voice type; voice messages are
+  expected to arrive as `audio`, which is not confirmed live. MAX never yields `voice`,
+  `video_note`, `animation` or `poll`.
+
 Extend `AbstractController` and implement `handle(AbstractUpdate $update): void`.
 Call `emitWebhook($rawBody, $suppliedSecret)` to emit HTTP 200 and `{"ok":true}`.
 Use `webhook()` instead when your framework owns the HTTP response. The application
@@ -179,11 +232,29 @@ extracts Telegram's `X-Telegram-Bot-Api-Secret-Token` or MAX's
 ASCII letters, digits, underscores or hyphens. MAX sends it as `secret` in the subscription
 body. Do not embed the secret in the endpoint URL.
 
+Subscribed update types live in one constant per platform, used by both `setWebhook()`
+and `getUpdates()`: `Telegram\BotApi::UPDATE_TYPES` (`message`, `callback_query`,
+`my_chat_member`) and `Max\BotApi::UPDATE_TYPES` (`message_created`,
+`message_callback`, `bot_started`, `bot_stopped`). Existing webhooks keep their old list
+until `setWebhook()` is called again.
+
 MAX `setWebhook()` sends POST for the requested URL; it does not itself delete
-other subscriptions. Automatic replacement is not assumed. When intentionally replacing all
-endpoints, call `deleteWebhook()` before `setWebhook($newUrl)`; this removes all current
-subscriptions and creates a delivery gap if registration fails. Verify subscriptions
-via GET `/subscriptions` after changing the URL.
+other subscriptions. Automatic replacement is not assumed. `deleteWebhook($url)` validates
+the URL as `setWebhook()` does, reads GET `/subscriptions` and removes only that
+subscription with one DELETE `/subscriptions?url=…` (a duplicate entry does not add a
+request); if it is not there, nothing
+happens, as on Telegram, so a repeated disconnect is not an error. Use it to disconnect one
+bot without touching subscriptions of other services. `deleteWebhook()` without an
+argument removes all current subscriptions: one GET plus one DELETE per subscription. When
+intentionally replacing all endpoints, call it before `setWebhook($newUrl)`; this creates
+a delivery gap if registration fails. Verify subscriptions via GET `/subscriptions` after
+changing the URL. Telegram has exactly one
+webhook per bot: with `$url` it first reads `getWebhookInfo` and removes the webhook only
+if it is exactly that URL (strict comparison), so a webhook of another service the bot was
+handed to stays (two requests); without `$url` it removes any webhook. On both platforms
+the check and the removal are two requests, not atomic: a webhook another service sets
+between them can be removed too. Custom `AbstractBotApi` subclasses must declare
+`deleteWebhook(?string $url = null): void`.
 Empty token or webhook secret disables processing. Comparison uses `hash_equals`.
 Malformed JSON, handler exceptions, and logger failures still acknowledge the webhook.
 
