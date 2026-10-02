@@ -66,7 +66,12 @@ src/diBot/
 
 Платформонезависимый апдейт с полями: `updateId`, `platform`, `userId`, `chatId`,
 `isPrivateChat`, `text`, `command`, `commandPayload`, `callbackId`, `payload`,
-`userProfile` (username, имя, фамилия, язык), `attachments`, `otherContent`, `membership`.
+`userProfile` (username, имя, фамилия, язык), `attachments`, `otherContent`, `membership`,
+`raw`.
+
+`raw` – исходный апдейт разобранным JSON (`json_decode(..., true)`, не побайтно), только у
+апдейтов, отданных приложению: отброшенные `fromArray()` при опросе не сохранить. В нём
+данные пользователя и ссылки на файлы – в журнал не писать.
 
 `membership` – апдейт только о присутствии бота в личном чате, без текста и команды:
 `stopped` (Telegram `my_chat_member` – бот был в чате и пропал, MAX `bot_stopped`) или
