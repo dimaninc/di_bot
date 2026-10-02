@@ -199,20 +199,31 @@ final class TransportTest extends TestCase
         self::assertSame('GET', $http->requests[0]->method);
         self::assertStringContainsString('two', $http->requests[2]->url);
     }
-    public function testMaxDeleteOwnSubscriptionIsOneRequest(): void
+    public function testMaxDeleteOwnSubscriptionOnly(): void
     {
-        $http = new FakeClient([FakeClient::json(['success' => true])]);
-        (new Max(new Config('token'), $http))->deleteWebhook('https://example.com/hook?bot=1');
-        self::assertCount(1, $http->requests);
-        self::assertSame('DELETE', $http->requests[0]->method);
-        self::assertNull($http->requests[0]->body);
+        $own = 'https://example.com/hook?bot=1';
+        $list = FakeClient::json([
+            'subscriptions' => [['url' => 'https://other.example/hook'], ['url' => $own]],
+        ]);
+        $http = new FakeClient([$list, FakeClient::json(['success' => true])]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(2, $http->requests, 'сверка и снятие своей – два запроса');
+        self::assertSame('GET', $http->requests[0]->method);
+        self::assertSame('DELETE', $http->requests[1]->method);
+        self::assertNull($http->requests[1]->body);
         $query = [];
-        parse_str((string) parse_url($http->requests[0]->url, PHP_URL_QUERY), $query);
-        self::assertSame(['url' => 'https://example.com/hook?bot=1'], $query);
+        parse_str((string) parse_url($http->requests[1]->url, PHP_URL_QUERY), $query);
+        self::assertSame(['url' => $own], $query, 'чужая подписка цела');
         self::assertStringStartsWith(
             Max::DEFAULT_BASE_URL . '/subscriptions?',
-            $http->requests[0]->url
+            $http->requests[1]->url
         );
+        // Своей нет (уже снята) – ничего не делаем, как Telegram.
+        $http = new FakeClient([
+            FakeClient::json(['subscriptions' => [['url' => 'https://other.example/hook']]]),
+        ]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(1, $http->requests);
         foreach (
             ['http://example.com/hook', 'https://u:p@example.com/', 'https://example.com/#x', '']
             as $url
@@ -230,7 +241,10 @@ final class TransportTest extends TestCase
     {
         $info = fn(string $url) => FakeClient::json(['ok' => true, 'result' => ['url' => $url]]);
         // Свой адрес – снимается.
-        $http = new FakeClient([$info('https://example.com/x'), FakeClient::json(['ok' => true, 'result' => true])]);
+        $http = new FakeClient([
+            $info('https://example.com/x'),
+            FakeClient::json(['ok' => true, 'result' => true]),
+        ]);
         (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
         self::assertCount(2, $http->requests);
         self::assertStringEndsWith('/getWebhookInfo', $http->requests[0]->url);
@@ -255,7 +269,8 @@ final class TransportTest extends TestCase
             self::assertSame('invalid_webhook_info', $e->reason);
         }
         $this->expectException(\InvalidArgumentException::class);
-        (new Telegram(new Config('123:token'), new FakeClient()))->deleteWebhook('http://example.com/x');
+        $api = new Telegram(new Config('123:token'), new FakeClient());
+        $api->deleteWebhook('http://example.com/x');
     }
     public function testUpdateTypesAreSharedByWebhookAndPolling(): void
     {

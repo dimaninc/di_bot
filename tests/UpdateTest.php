@@ -129,7 +129,8 @@ final class UpdateTest extends TestCase
         self::assertSame([], $u->otherContent);
         self::assertSame(
             AbstractUpdate::MEMBERSHIP_STARTED,
-            Telegram::fromArray(self::telegramMembership('member', old: ['status' => 'kicked']))->membership
+            Telegram::fromArray(self::telegramMembership('member', old: ['status' => 'kicked']))
+                ->membership
         );
         self::assertSame(
             AbstractUpdate::MEMBERSHIP_STOPPED,
@@ -145,16 +146,29 @@ final class UpdateTest extends TestCase
             ]
             as [$new, $old]
         ) {
-            self::assertNull(Telegram::fromArray(self::telegramMembership($new, old: $old)), json_encode($old) . " -> $new");
+            self::assertNull(
+                Telegram::fromArray(self::telegramMembership($new, old: $old)),
+                json_encode($old) . " -> $new"
+            );
         }
         self::assertSame(
             AbstractUpdate::MEMBERSHIP_STARTED,
-            Telegram::fromArray(self::telegramMembership('member', old: ['status' => 'restricted', 'is_member' => false]))->membership
+            Telegram::fromArray(
+                self::telegramMembership(
+                    'member',
+                    old: ['status' => 'restricted', 'is_member' => false]
+                )
+            )->membership
         );
         // Группы и каналы – не события собеседника: не отдаются (у MAX их нет в подписке).
         foreach (['group', 'supergroup', 'channel'] as $type) {
             self::assertNull(Telegram::fromArray(self::telegramMembership('kicked', $type)), $type);
-            self::assertNull(Telegram::fromArray(self::telegramMembership('member', $type, ['status' => 'left'])), $type);
+            self::assertNull(
+                Telegram::fromArray(
+                    self::telegramMembership('member', $type, ['status' => 'left'])
+                ),
+                $type
+            );
         }
         $raw = self::telegramMembership('kicked');
         unset($raw['my_chat_member']['new_chat_member']['status']);
@@ -183,7 +197,9 @@ final class UpdateTest extends TestCase
         self::assertSame('', $stopped->text);
         self::assertSame('', $stopped->command);
         $started = Max::fromArray(['update_type' => 'bot_started'] + $raw);
-        self::assertSame(AbstractUpdate::MEMBERSHIP_STARTED, $started->membership);
+        // bot_started – это /start (первый контакт или возврат), а не событие членства:
+        // обработчик, пропускающий события членства, не должен терять /start с payload.
+        self::assertSame('', $started->membership);
         self::assertSame('start', $started->command);
         self::assertSame('/start', $started->text);
         // Одинаковые чат/пользователь/время у старта и остановки – разные события.
@@ -241,7 +257,16 @@ final class UpdateTest extends TestCase
         self::assertSame(['animation'], $u->otherContent);
         self::assertSame([], $u->attachments);
         // Содержимое без своего вида – other, а не пустое сообщение.
-        foreach (['story', 'game', 'paid_media', 'invoice', 'giveaway', 'giveaway_winners', 'checklist'] as $key) {
+        $kinds = [
+            'story',
+            'game',
+            'paid_media',
+            'invoice',
+            'giveaway',
+            'giveaway_winners',
+            'checklist',
+        ];
+        foreach ($kinds as $key) {
             $raw = self::telegram('');
             $raw['message'][$key] = ['id' => 1];
             self::assertSame(['other'], Telegram::fromArray($raw)->otherContent, $key);
@@ -287,10 +312,16 @@ final class UpdateTest extends TestCase
         self::assertCount(2, $u->attachments);
         // Картинка и файл без токена и ссылки – other, а не пустое сообщение.
         $raw2 = self::max();
-        $raw2['message']['body']['attachments'] = [['type' => 'image', 'payload' => []], ['type' => 'file']];
+        $raw2['message']['body']['attachments'] = [
+            ['type' => 'image', 'payload' => []],
+            ['type' => 'file'],
+        ];
         $u = Max::fromArray($raw2);
         self::assertSame([], $u->attachments);
         self::assertSame(['other'], $u->otherContent);
+        // Битые элементы (не объект, без строкового type) – не содержимое собеседника.
+        $raw2['message']['body']['attachments'] = ['garbage', ['type' => 42], ['payload' => []]];
+        self::assertSame([], Max::fromArray($raw2)->otherContent);
         $raw['update_type'] = 'message_callback';
         $raw['callback'] = ['callback_id' => 'c', 'payload' => 'go', 'user' => ['user_id' => 19]];
         $u = Max::fromArray($raw);

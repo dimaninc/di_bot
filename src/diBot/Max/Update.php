@@ -25,7 +25,10 @@ final class Update extends AbstractUpdate
             $u->chatId = self::string($data['chat_id'] ?? '');
             $u->isPrivateChat = true;
             if ($type === 'bot_started') {
-                $u->membership = self::MEMBERSHIP_STARTED;
+                // По справочнику MAX – «впервые начал общение или возобновил после остановки»,
+                // то есть это /start, а не событие членства: membership не ставим. Иначе
+                // обработчик, пропускающий события членства, терял бы каждый /start с
+                // payload. Возврат после остановки на MAX виден только так.
                 $u->text = '/start';
                 $u->command = 'start';
                 $u->commandPayload = self::string($data['payload'] ?? '');
@@ -87,13 +90,13 @@ final class Update extends AbstractUpdate
         $other = [];
         foreach (is_array($attachments) ? $attachments : [] as $attachment) {
             $type = is_array($attachment) ? $attachment['type'] ?? null : null;
-            if ($type === 'inline_keyboard') {
+            // Битый элемент (не объект, без строкового type) – не содержимое собеседника.
+            if (!is_string($type) || $type === 'inline_keyboard') {
                 continue;
             }
             if ($type !== 'image' && $type !== 'file') {
-                $other[] = in_array($type, ['audio', 'video', 'sticker', 'location', 'contact'], true)
-                    ? $type
-                    : 'other';
+                $known = ['audio', 'video', 'sticker', 'location', 'contact'];
+                $other[] = in_array($type, $known, true) ? $type : 'other';
                 continue;
             }
             $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];

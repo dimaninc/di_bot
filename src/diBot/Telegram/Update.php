@@ -110,6 +110,7 @@ final class Update extends AbstractUpdate
         $u->profile($from);
         return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
     }
+
     /** @return list<string> виды содержимого из OTHER_CONTENT в порядке полей сообщения */
     private static function parseOtherContent(array $message): array
     {

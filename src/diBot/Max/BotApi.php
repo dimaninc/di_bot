@@ -301,21 +301,33 @@ class BotApi extends AbstractBotApi
     public function deleteWebhook(?string $url = null): void
     {
         if ($url !== null) {
-            // Ровно один запрос и только своя подписка: подписки других сервисов не трогаем.
             Config::assertHttpsUrl($url);
-            $this->request('DELETE', '/subscriptions', query: ['url' => $url]);
-            return;
         }
+        foreach ($this->subscriptionUrls() as $current) {
+            // С $url – только своя подписка, подписки других сервисов не трогаем; нет её –
+            // ничего не делаем (как Telegram: повторное снятие не ошибка). Не больше двух
+            // запросов.
+            if ($url === null || $current === $url) {
+                $this->request('DELETE', '/subscriptions', query: ['url' => $current]);
+            }
+        }
+    }
+
+    /** @return list<string> */
+    private function subscriptionUrls(): array
+    {
         $result = $this->request('GET', '/subscriptions');
         if (!is_array($result['subscriptions'] ?? null)) {
             throw new ApiException(200, 'invalid_subscriptions');
         }
+        $urls = [];
         foreach ($result['subscriptions'] as $sub) {
             if (!is_array($sub) || !is_string($sub['url'] ?? null)) {
                 throw new ApiException(200, 'invalid_subscription');
             }
-            $this->request('DELETE', '/subscriptions', query: ['url' => $sub['url']]);
+            $urls[] = $sub['url'];
         }
+        return $urls;
     }
 
     public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch
