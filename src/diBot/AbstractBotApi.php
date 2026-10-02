@@ -64,7 +64,8 @@ abstract class AbstractBotApi
     /** @param list<array{command:string,description:string}> $commands */
     abstract public function setCommands(array $commands): array;
     abstract public function setWebhook(string $url): array;
-    abstract public function deleteWebhook(): void;
+    /** $url – снять только эту подписку (MAX); null – снять все. Telegram аргумент игнорирует. */
+    abstract public function deleteWebhook(?string $url = null): void;
     abstract public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch;
 
     public function log(string $event, array $context = []): void

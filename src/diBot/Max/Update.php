@@ -15,18 +15,23 @@ final class Update extends AbstractUpdate
         $body = is_array($msg['body'] ?? null) ? $msg['body'] : [];
         $recipient = is_array($msg['recipient'] ?? null) ? $msg['recipient'] : [];
         $u->messageId = self::string($body['mid'] ?? '');
-        if ($type === 'bot_started') {
+        if ($type === 'bot_started' || $type === 'bot_stopped') {
             $timestamp = self::string($data['timestamp'] ?? '');
-            // Для старта нет message/callback ID; без timestamp дедупликация неоднозначна.
+            // У старта/остановки нет message/callback ID; без timestamp дедупликация неоднозначна.
             if ($timestamp === '' || !ctype_digit($timestamp)) {
                 return null;
             }
             $user = $data['user'] ?? [];
             $u->chatId = self::string($data['chat_id'] ?? '');
             $u->isPrivateChat = true;
-            $u->text = '/start';
-            $u->command = 'start';
-            $u->commandPayload = self::string($data['payload'] ?? '');
+            if ($type === 'bot_started') {
+                $u->membership = self::MEMBERSHIP_STARTED;
+                $u->text = '/start';
+                $u->command = 'start';
+                $u->commandPayload = self::string($data['payload'] ?? '');
+            } else {
+                $u->membership = self::MEMBERSHIP_STOPPED;
+            }
         } elseif ($type === 'message_created' || $type === 'message_callback') {
             $callback = is_array($data['callback'] ?? null) ? $data['callback'] : [];
             $user = $type === 'message_callback' ? $callback['user'] ?? [] : $msg['sender'] ?? [];
@@ -43,6 +48,7 @@ final class Update extends AbstractUpdate
                 $u->text = self::string($body['text'] ?? '');
                 $u->parseCommand();
                 $u->attachments = self::parseAttachments($body['attachments'] ?? []);
+                $u->parseOtherContent($body['attachments'] ?? []);
                 if ($u->messageId === '') {
                     return null;
                 }
@@ -63,6 +69,26 @@ final class Update extends AbstractUpdate
         $u->updateId = hash('sha256', $type . ':' . $identity);
         return $u->chatId !== '' && $u->userId !== '' ? $u : null;
     }
+
+    /**
+     * Отдельного типа voice в схеме MAX нет: голосовое, вероятно, приходит как audio
+     * (живьём не проверено), поэтому audio не переименовываем. share и неизвестные – other.
+     */
+    private function parseOtherContent(mixed $attachments): void
+    {
+        foreach (is_array($attachments) ? $attachments : [] as $attachment) {
+            $type = is_array($attachment) ? $attachment['type'] ?? null : null;
+            if (!is_string($type) || in_array($type, ['image', 'file', 'inline_keyboard'], true)) {
+                continue;
+            }
+            $this->addOtherContent(
+                in_array($type, ['audio', 'video', 'sticker', 'location', 'contact'], true)
+                    ? $type
+                    : 'other'
+            );
+        }
+    }
+
     private static function parseAttachments(mixed $attachments): array
     {
         $result = [];

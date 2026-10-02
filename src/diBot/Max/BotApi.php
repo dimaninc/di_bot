@@ -16,6 +16,13 @@ class BotApi extends AbstractBotApi
     public const BUTTONS_PER_ROW = 7;
     public const BUTTONS_MAX = 210;
     public const ROWS_MAX = 30;
+    // Один список на вебхук и поллинг, чтобы подписки не разошлись.
+    public const UPDATE_TYPES = [
+        'message_created',
+        'message_callback',
+        'bot_started',
+        'bot_stopped',
+    ];
 
     public function platform(): Platform
     {
@@ -287,12 +294,18 @@ class BotApi extends AbstractBotApi
         return $this->request('POST', '/subscriptions', [
             'url' => $url,
             'secret' => $this->config->webhookSecret,
-            'update_types' => ['message_created', 'message_callback', 'bot_started'],
+            'update_types' => self::UPDATE_TYPES,
         ]);
     }
 
-    public function deleteWebhook(): void
+    public function deleteWebhook(?string $url = null): void
     {
+        if ($url !== null) {
+            // Ровно один запрос и только своя подписка: подписки других сервисов не трогаем.
+            Config::assertHttpsUrl($url);
+            $this->request('DELETE', '/subscriptions', query: ['url' => $url]);
+            return;
+        }
         $result = $this->request('GET', '/subscriptions');
         if (!is_array($result['subscriptions'] ?? null)) {
             throw new ApiException(200, 'invalid_subscriptions');
@@ -314,7 +327,7 @@ class BotApi extends AbstractBotApi
         $query = [
             'limit' => 100,
             'timeout' => $timeout,
-            'types' => 'message_created,message_callback,bot_started',
+            'types' => implode(',', self::UPDATE_TYPES),
         ];
         if ($cursor !== null) {
             $query['marker'] = $cursor;

@@ -196,6 +196,77 @@ final class TransportTest extends TestCase
             $http->requests[1]->url
         );
         self::assertCount(3, $http->requests);
+        self::assertSame('GET', $http->requests[0]->method);
+        self::assertStringContainsString('two', $http->requests[2]->url);
+    }
+    public function testMaxDeleteOwnSubscriptionIsOneRequest(): void
+    {
+        $http = new FakeClient([FakeClient::json(['success' => true])]);
+        (new Max(new Config('token'), $http))->deleteWebhook('https://example.com/hook?bot=1');
+        self::assertCount(1, $http->requests);
+        self::assertSame('DELETE', $http->requests[0]->method);
+        self::assertNull($http->requests[0]->body);
+        $query = [];
+        parse_str((string) parse_url($http->requests[0]->url, PHP_URL_QUERY), $query);
+        self::assertSame(['url' => 'https://example.com/hook?bot=1'], $query);
+        self::assertStringStartsWith(
+            Max::DEFAULT_BASE_URL . '/subscriptions?',
+            $http->requests[0]->url
+        );
+        foreach (
+            ['http://example.com/hook', 'https://u:p@example.com/', 'https://example.com/#x', '']
+            as $url
+        ) {
+            $http = new FakeClient();
+            try {
+                (new Max(new Config('token'), $http))->deleteWebhook($url);
+                self::fail('Invalid URL accepted');
+            } catch (\InvalidArgumentException) {
+                self::assertSame([], $http->requests);
+            }
+        }
+    }
+    public function testTelegramDeleteWebhookIgnoresUrl(): void
+    {
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => true])]);
+        (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+        self::assertCount(1, $http->requests);
+        self::assertStringEndsWith('/deleteWebhook', $http->requests[0]->url);
+        self::assertStringNotContainsString('example.com', $http->requests[0]->body);
+    }
+    public function testUpdateTypesAreSharedByWebhookAndPolling(): void
+    {
+        self::assertSame(['message', 'callback_query', 'my_chat_member'], Telegram::UPDATE_TYPES);
+        self::assertContains('bot_stopped', Max::UPDATE_TYPES);
+        self::assertContains('bot_started', Max::UPDATE_TYPES);
+        $config = new Config('123:token', webhookSecret: 'secret');
+        $http = new FakeClient([
+            FakeClient::json(['ok' => true, 'result' => true]),
+            FakeClient::json(['ok' => true, 'result' => []]),
+        ]);
+        $api = new Telegram($config, $http);
+        $api->setWebhook('https://example.com/hook');
+        $api->getUpdates('1');
+        foreach ($http->requests as $request) {
+            self::assertSame(
+                Telegram::UPDATE_TYPES,
+                json_decode($request->body, true)['allowed_updates']
+            );
+        }
+        $http = new FakeClient([
+            FakeClient::json(['success' => true]),
+            FakeClient::json(['updates' => [], 'marker' => 5]),
+        ]);
+        $api = new Max($config, $http);
+        $api->setWebhook('https://example.com/hook');
+        $api->getUpdates('1');
+        self::assertSame(
+            Max::UPDATE_TYPES,
+            json_decode($http->requests[0]->body, true)['update_types']
+        );
+        $query = [];
+        parse_str((string) parse_url($http->requests[1]->url, PHP_URL_QUERY), $query);
+        self::assertSame(Max::UPDATE_TYPES, explode(',', $query['types']));
     }
     public function testPollingUsesNativeOffsetsAndIgnoresUnsupportedUpdates(): void
     {

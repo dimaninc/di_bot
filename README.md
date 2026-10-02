@@ -170,6 +170,37 @@ MAX has no documented locale in User: `userProfile['language']` is empty when ab
 Do not assume TamTam's `user_locale` field exists in MAX or overwrite a known language
 with this empty value.
 
+`membership` is set only for bot membership events in a chat: `''` for ordinary updates,
+`AbstractUpdate::MEMBERSHIP_STOPPED` (`'stopped'`) or `MEMBERSHIP_STARTED` (`'started'`).
+Such an update has `chatId`, `userId`, `isPrivateChat` and `userProfile`, but no
+`messageId`, text, attachments or callback. Handlers that answer every update must check
+`membership` first: replying to a user who has just stopped the bot fails.
+
+- Telegram `my_chat_member`: `kicked` (user blocked the bot) and `left` map to `stopped`,
+  `member` to `started`. `userId` is the actor from `from`; in groups `isPrivateChat` is
+  false. `administrator`, `creator` and `restricted` are rights changes in groups or
+  channels rather than an unambiguous presence change and are ignored (`null`).
+- MAX `bot_stopped` maps to `stopped`; `bot_started` keeps the `/start` command and also
+  sets `started`. Both require a valid timestamp; their deduplication IDs include the
+  event type, so a start and a stop with the same chat, user and timestamp never collide.
+  The `bot_stopped` shape (`chat_id`, `user`, `timestamp`) mirrors `bot_started` and has
+  not been confirmed live.
+
+`otherContent` lists kinds of message content the library does not expose as
+`attachments`, in order of appearance and without duplicates: `voice`, `audio`, `video`,
+`video_note`, `sticker`, `animation`, `location`, `contact`, `poll`, `other`. It holds
+kinds only, never file references or URLs, and is empty for callbacks. Use it to record
+"voice message, cannot be played" instead of an empty message.
+
+- Telegram: `voice`, `audio`, `video`, `video_note`, `sticker`, `animation`, `location`,
+  `venue` (as `location`), `contact`, `poll`, `dice` (as `other`). An animation also
+  carries `document`; it stays out of `attachments` and is reported once as `animation`.
+- MAX: attachment types other than `image`, `file` and `inline_keyboard`; `audio`,
+  `video`, `sticker`, `location`, `contact` keep their names, `share` and unknown types
+  become `other`. The MAX reference has no separate voice type; voice messages are
+  expected to arrive as `audio`, which is not confirmed live. MAX never yields `voice`,
+  `video_note`, `animation` or `poll`.
+
 Extend `AbstractController` and implement `handle(AbstractUpdate $update): void`.
 Call `emitWebhook($rawBody, $suppliedSecret)` to emit HTTP 200 and `{"ok":true}`.
 Use `webhook()` instead when your framework owns the HTTP response. The application
@@ -179,11 +210,22 @@ extracts Telegram's `X-Telegram-Bot-Api-Secret-Token` or MAX's
 ASCII letters, digits, underscores or hyphens. MAX sends it as `secret` in the subscription
 body. Do not embed the secret in the endpoint URL.
 
+Subscribed update types live in one constant per platform, used by both `setWebhook()`
+and `getUpdates()`: `Telegram\BotApi::UPDATE_TYPES` (`message`, `callback_query`,
+`my_chat_member`) and `Max\BotApi::UPDATE_TYPES` (`message_created`,
+`message_callback`, `bot_started`, `bot_stopped`). Existing webhooks keep their old list
+until `setWebhook()` is called again.
+
 MAX `setWebhook()` sends POST for the requested URL; it does not itself delete
-other subscriptions. Automatic replacement is not assumed. When intentionally replacing all
-endpoints, call `deleteWebhook()` before `setWebhook($newUrl)`; this removes all current
-subscriptions and creates a delivery gap if registration fails. Verify subscriptions
-via GET `/subscriptions` after changing the URL.
+other subscriptions. Automatic replacement is not assumed. `deleteWebhook($url)` removes
+only that subscription with a single DELETE `/subscriptions?url=…` (the URL is validated
+first, as in `setWebhook()`); use it to disconnect one bot without touching subscriptions
+of other services. `deleteWebhook()` without an argument lists and removes all current
+subscriptions, one request each. When intentionally replacing all endpoints, call it before
+`setWebhook($newUrl)`; this creates a delivery gap if registration fails. Verify
+subscriptions via GET `/subscriptions` after changing the URL. Telegram has exactly one
+webhook per bot and ignores the argument. Custom `AbstractBotApi` subclasses must declare
+`deleteWebhook(?string $url = null): void`.
 Empty token or webhook secret disables processing. Comparison uses `hash_equals`.
 Malformed JSON, handler exceptions, and logger failures still acknowledge the webhook.
 

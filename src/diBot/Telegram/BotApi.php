@@ -17,6 +17,8 @@ class BotApi extends AbstractBotApi
     public const BUTTONS_PER_ROW = 8;
     public const BUTTONS_MAX = 100;
     public const ROWS_MAX = 100;
+    // Один список на вебхук и поллинг, чтобы подписки не разошлись.
+    public const UPDATE_TYPES = ['message', 'callback_query', 'my_chat_member'];
 
     public function platform(): Platform
     {
@@ -192,11 +194,12 @@ class BotApi extends AbstractBotApi
         return $this->request('setWebhook', [
             'url' => $url,
             'secret_token' => $this->config->webhookSecret,
-            'allowed_updates' => ['message', 'callback_query'],
+            'allowed_updates' => self::UPDATE_TYPES,
         ]);
     }
 
-    public function deleteWebhook(): void
+    /** У бота Telegram ровно один вебхук, поэтому $url не используется. */
+    public function deleteWebhook(?string $url = null): void
     {
         $this->request('deleteWebhook', ['drop_pending_updates' => false]);
     }
@@ -212,7 +215,7 @@ class BotApi extends AbstractBotApi
             [
                 'offset' => $cursor ?? '0',
                 'timeout' => $timeout,
-                'allowed_updates' => ['message', 'callback_query'],
+                'allowed_updates' => self::UPDATE_TYPES,
             ],
             timeout: $timeout + $this->config->requestTimeout
         );

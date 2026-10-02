@@ -6,11 +6,29 @@ use diBot\Platform;
 
 final class Update extends AbstractUpdate
 {
+    /** Поля сообщения, которые не попадают в attachments, и их нормализованный вид. */
+    private const OTHER_CONTENT = [
+        'voice' => 'voice',
+        'audio' => 'audio',
+        'video' => 'video',
+        'video_note' => 'video_note',
+        'sticker' => 'sticker',
+        'animation' => 'animation',
+        'location' => 'location',
+        'venue' => 'location',
+        'contact' => 'contact',
+        'poll' => 'poll',
+        'dice' => 'other',
+    ];
+
     public static function fromArray(array $data): ?self
     {
         $u = new self();
         $u->platform = Platform::Telegram;
         $u->updateId = self::string($data['update_id'] ?? '');
+        if (array_key_exists('my_chat_member', $data)) {
+            return self::membership($u, $data['my_chat_member']);
+        }
         $callback = $data['callback_query'] ?? null;
         $msg = is_array($callback) ? $callback['message'] ?? null : $data['message'] ?? null;
         if (!is_array($msg)) {
@@ -36,7 +54,42 @@ final class Update extends AbstractUpdate
             $u->text = self::string($msg['text'] ?? ($msg['caption'] ?? ''));
             $u->parseCommand();
             $u->attachments = self::parseAttachments($msg);
+            foreach (array_keys($msg) as $key) {
+                if (isset(self::OTHER_CONTENT[$key]) && is_array($msg[$key])) {
+                    $u->addOtherContent(self::OTHER_CONTENT[$key]);
+                }
+            }
         }
+        return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
+    }
+
+    private static function membership(self $u, mixed $event): ?self
+    {
+        if (!is_array($event)) {
+            return null;
+        }
+        $chat = $event['chat'] ?? null;
+        $from = $event['from'] ?? null;
+        $member = $event['new_chat_member'] ?? null;
+        if (!is_array($chat) || !is_array($from) || !is_array($member)) {
+            return null;
+        }
+        // В личном чате приходят только kicked (бот остановлен) и member (возвращён).
+        // left – бот покинул чат, по смыслу та же остановка. administrator/creator/
+        // restricted – смена прав в группе или канале: присутствие бота они не меняют
+        // однозначно (у restricted оно зависит от is_member), поэтому такие события не отдаём.
+        $u->membership = match ($member['status'] ?? null) {
+            'kicked', 'left' => self::MEMBERSHIP_STOPPED,
+            'member' => self::MEMBERSHIP_STARTED,
+            default => '',
+        };
+        if ($u->membership === '') {
+            return null;
+        }
+        $u->chatId = self::string($chat['id'] ?? '');
+        $u->userId = self::string($from['id'] ?? '');
+        $u->isPrivateChat = ($chat['type'] ?? '') === 'private';
+        $u->profile($from);
         return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
     }
     private static function parseAttachments(array $message): array
