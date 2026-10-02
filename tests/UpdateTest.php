@@ -328,6 +328,19 @@ final class UpdateTest extends TestCase
         self::assertTrue($u->isCallback());
         self::assertSame([], $u->otherContent);
     }
+    public function testTelegramImageSentAsFileIsDocument(): void
+    {
+        $raw = self::telegram('');
+        $raw['message']['document'] = [
+            'file_id' => 'heic',
+            'file_name' => 'IMG.HEIC',
+            'mime_type' => 'image/heic',
+            'file_size' => 25000000,
+        ];
+        $item = Telegram::fromArray($raw)->attachments[0];
+        self::assertSame('document', $item->kind);
+        self::assertSame('image/heic', $item->mime);
+    }
     public function testRawKeepsTheSourceUpdate(): void
     {
         self::assertSame(self::telegram(), Telegram::fromArray(self::telegram())->raw);

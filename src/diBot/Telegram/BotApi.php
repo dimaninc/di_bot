@@ -195,6 +195,8 @@ class BotApi extends AbstractBotApi
             'url' => $url,
             'secret_token' => $this->config->webhookSecret,
             'allowed_updates' => self::UPDATE_TYPES,
+            // По одному: два апдейта одного чата не обгоняют друг друга при доставке.
+            'max_connections' => 1,
         ]);
     }
 

@@ -306,6 +306,11 @@ final class TransportTest extends TestCase
         ]);
         $api = new Telegram($config, $http);
         $api->setWebhook('https://example.com/hook');
+        self::assertSame(
+            1,
+            json_decode($http->requests[0]->body, true)['max_connections'],
+            'апдейты бота доставляются по одному'
+        );
         $api->getUpdates('1');
         foreach ($http->requests as $request) {
             self::assertSame(

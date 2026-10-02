@@ -64,7 +64,9 @@ final class AttachmentTest extends TestCase
         $items = MaxUpdate::fromArray($raw)->attachments;
         self::assertCount(3, $items);
         self::assertSame('123', $items[0]->ref);
-        self::assertSame('photo', $items[1]->kind);
+        // Картинка, отправленная файлом, – документ: вид как отправлено, а не по расширению.
+        self::assertSame('document', $items[1]->kind);
+        self::assertSame('photo', $items[0]->kind);
         self::assertSame('scan.PNG', $items[1]->filename);
         self::assertSame(33, $items[1]->size);
         self::assertSame('document', $items[2]->kind);
