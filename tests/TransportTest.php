@@ -218,6 +218,13 @@ final class TransportTest extends TestCase
             Max::DEFAULT_BASE_URL . '/subscriptions?',
             $http->requests[1]->url
         );
+        // Адрес в списке дважды – всё равно один DELETE.
+        $http = new FakeClient([
+            FakeClient::json(['subscriptions' => [['url' => $own], ['url' => $own]]]),
+            FakeClient::json(['success' => true]),
+        ]);
+        (new Max(new Config('token'), $http))->deleteWebhook($own);
+        self::assertCount(2, $http->requests);
         // Своей нет (уже снята) – ничего не делаем, как Telegram.
         $http = new FakeClient([
             FakeClient::json(['subscriptions' => [['url' => 'https://other.example/hook']]]),

@@ -303,12 +303,15 @@ class BotApi extends AbstractBotApi
         if ($url !== null) {
             Config::assertHttpsUrl($url);
         }
+        // С $url – GET и один DELETE своей подписки (повтор адреса в списке не даёт второго
+        // запроса), подписки других сервисов не трогаем; нет её – ничего не делаем (как
+        // Telegram: повторное снятие не ошибка). Без $url – GET и DELETE на каждую подписку.
         foreach ($this->subscriptionUrls() as $current) {
-            // С $url – только своя подписка, подписки других сервисов не трогаем; нет её –
-            // ничего не делаем (как Telegram: повторное снятие не ошибка). Не больше двух
-            // запросов.
             if ($url === null || $current === $url) {
                 $this->request('DELETE', '/subscriptions', query: ['url' => $current]);
+                if ($url !== null) {
+                    return;
+                }
             }
         }
     }

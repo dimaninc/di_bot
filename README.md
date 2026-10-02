@@ -2,9 +2,8 @@
 
 PHP 8.3 transport for Telegram and MAX. No database, environment lookup, or CMS dependency.
 
-The first release is pending review and merge. No released version is available yet.
-For development, check out the pull-request branch and run `composer install`.
-Applications should pin a published version after the first release.
+Releases are git tags (`0.1.0`, `0.2.0`, …); changes and upgrade notes are in the GitHub
+release notes. Applications pin a released version, for example `"dimaninc/di_bot": "^0.2"`.
 
 ## Send a message
 
@@ -187,7 +186,7 @@ The platforms differ in how a return looks:
   the `/start` command with its payload, so it has `membership = ''`: a handler that skips
   membership updates still handles every `/start`. MAX never yields `started`.
 
-Treat any ordinary update from the user as presence too.
+Details per platform:
 
 - Telegram `my_chat_member` in a private chat: the event is a change of presence, not of
   status. `old_chat_member` and `new_chat_member` are compared (present: `member`,
@@ -200,6 +199,8 @@ Treat any ordinary update from the user as presence too.
   type, so a start and a stop with the same chat, user and timestamp never collide. The
   `bot_stopped` fields (`chat_id`, `user`, `timestamp`) mirror `bot_started`; the reference
   page does not list them statically and they are not confirmed live.
+
+Treat any ordinary update from the user as presence too.
 
 `otherContent` lists kinds of message content the library does not expose as
 `attachments`, in order of appearance and without duplicates: `voice`, `audio`, `video`,
@@ -240,12 +241,14 @@ until `setWebhook()` is called again.
 MAX `setWebhook()` sends POST for the requested URL; it does not itself delete
 other subscriptions. Automatic replacement is not assumed. `deleteWebhook($url)` validates
 the URL as `setWebhook()` does, reads GET `/subscriptions` and removes only that
-subscription with DELETE `/subscriptions?url=…` – two requests; if it is not there, nothing
+subscription with one DELETE `/subscriptions?url=…` (a duplicate entry does not add a
+request); if it is not there, nothing
 happens, as on Telegram, so a repeated disconnect is not an error. Use it to disconnect one
 bot without touching subscriptions of other services. `deleteWebhook()` without an
-argument removes all current subscriptions, one request each. When intentionally replacing all endpoints, call it before
-`setWebhook($newUrl)`; this creates a delivery gap if registration fails. Verify
-subscriptions via GET `/subscriptions` after changing the URL. Telegram has exactly one
+argument removes all current subscriptions: one GET plus one DELETE per subscription. When
+intentionally replacing all endpoints, call it before `setWebhook($newUrl)`; this creates
+a delivery gap if registration fails. Verify subscriptions via GET `/subscriptions` after
+changing the URL. Telegram has exactly one
 webhook per bot: with `$url` it first reads `getWebhookInfo` and removes the webhook only
 if it is exactly that URL (strict comparison), so a webhook of another service the bot was
 handed to stays (two requests); without `$url` it removes any webhook. On both platforms
