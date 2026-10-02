@@ -202,6 +202,14 @@ Details per platform:
 
 Treat any ordinary update from the user as presence too.
 
+`raw` holds the source update as decoded JSON (`json_decode(..., true)`), from a webhook
+body or a polling batch alike, so an application that stores updates does not need the raw
+response. It is not byte-exact: an empty object `{}` re-encodes as `[]`; parsing the
+re-encoded value with `fromArray()` gives an equal update. Only updates the library hands to
+the application carry it: items `fromArray()` rejects (unsupported types, group membership
+events, malformed ones) are dropped from a polling batch and cannot be stored. It contains
+user data and file URLs: do not log it.
+
 `otherContent` lists kinds of message content the library does not expose as
 `attachments`, in order of appearance and without duplicates: `voice`, `audio`, `video`,
 `video_note`, `sticker`, `animation`, `location`, `contact`, `poll`, `other`. It holds

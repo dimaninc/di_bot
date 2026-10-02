@@ -7,6 +7,12 @@ abstract class AbstractUpdate
     public const MEMBERSHIP_STARTED = 'started';
 
     public Platform $platform;
+    /**
+     * Исходный апдейт – разобранный JSON (json_decode(..., true), не побайтно: {} станет []):
+     * приложению, которое хранит апдейты, он нужен и при опросе. Данные пользователя и ссылки
+     * на файлы – в журнал не писать.
+     */
+    public array $raw = [];
     public string $updateId = '';
     public string $userId = '';
     public string $chatId = '';

@@ -35,6 +35,7 @@ final class Update extends AbstractUpdate
     {
         $u = new self();
         $u->platform = Platform::Telegram;
+        $u->raw = $data;
         $u->updateId = self::string($data['update_id'] ?? '');
         if (array_key_exists('my_chat_member', $data)) {
             return self::membership($u, $data['my_chat_member']);

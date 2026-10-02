@@ -279,6 +279,21 @@ final class TransportTest extends TestCase
         $api = new Telegram(new Config('123:token'), new FakeClient());
         $api->deleteWebhook('http://example.com/x');
     }
+    public function testPolledUpdatesKeepRaw(): void
+    {
+        $item = [
+            'update_id' => 7,
+            'message' => [
+                'message_id' => 1,
+                'chat' => ['id' => 5, 'type' => 'private'],
+                'from' => ['id' => 5],
+                'text' => 'hi',
+            ],
+        ];
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => [$item]])]);
+        $batch = (new Telegram(new Config('123:token'), $http))->getUpdates('1');
+        self::assertSame($item, $batch->updates[0]->raw);
+    }
     public function testUpdateTypesAreSharedByWebhookAndPolling(): void
     {
         self::assertSame(['message', 'callback_query', 'my_chat_member'], Telegram::UPDATE_TYPES);
