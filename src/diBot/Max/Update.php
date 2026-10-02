@@ -47,8 +47,10 @@ final class Update extends AbstractUpdate
             } else {
                 $u->text = self::string($body['text'] ?? '');
                 $u->parseCommand();
-                $u->attachments = self::parseAttachments($body['attachments'] ?? []);
-                $u->parseOtherContent($body['attachments'] ?? []);
+                [$u->attachments, $other] = self::parseAttachments($body['attachments'] ?? []);
+                foreach ($other as $kind) {
+                    $u->addOtherContent($kind);
+                }
                 if ($u->messageId === '') {
                     return null;
                 }
@@ -71,32 +73,27 @@ final class Update extends AbstractUpdate
     }
 
     /**
-     * Отдельного типа voice в схеме MAX нет: голосовое, вероятно, приходит как audio
-     * (живьём не проверено), поэтому audio не переименовываем. share и неизвестные – other.
+     * Один проход: image и file с токеном или ссылкой – в attachments, остальное – виды для
+     * otherContent (так не держим два списка «обрабатываемых» типов). image/file без токена и
+     * ссылки – other: иначе сообщение пришло бы пустым. Отдельного типа voice в схеме MAX
+     * нет: голосовое, вероятно, приходит как audio (живьём не проверено), поэтому audio не
+     * переименовываем. share и неизвестные – other.
+     *
+     * @return array{0: list<\diBot\Attachment\Attachment>, 1: list<string>}
      */
-    private function parseOtherContent(mixed $attachments): void
-    {
-        foreach (is_array($attachments) ? $attachments : [] as $attachment) {
-            $type = is_array($attachment) ? $attachment['type'] ?? null : null;
-            if (!is_string($type) || in_array($type, ['image', 'file', 'inline_keyboard'], true)) {
-                continue;
-            }
-            $this->addOtherContent(
-                in_array($type, ['audio', 'video', 'sticker', 'location', 'contact'], true)
-                    ? $type
-                    : 'other'
-            );
-        }
-    }
-
     private static function parseAttachments(mixed $attachments): array
     {
         $result = [];
+        $other = [];
         foreach (is_array($attachments) ? $attachments : [] as $attachment) {
-            if (
-                !is_array($attachment) ||
-                !in_array($attachment['type'] ?? '', ['image', 'file'], true)
-            ) {
+            $type = is_array($attachment) ? $attachment['type'] ?? null : null;
+            if ($type === 'inline_keyboard') {
+                continue;
+            }
+            if ($type !== 'image' && $type !== 'file') {
+                $other[] = in_array($type, ['audio', 'video', 'sticker', 'location', 'contact'], true)
+                    ? $type
+                    : 'other';
                 continue;
             }
             $payload = is_array($attachment['payload'] ?? null) ? $attachment['payload'] : [];
@@ -104,6 +101,7 @@ final class Update extends AbstractUpdate
                 self::string($payload['token'] ?? '') ?: self::string($payload['photo_id'] ?? '');
             $url = self::string($payload['url'] ?? '');
             if ($ref === '' && $url === '') {
+                $other[] = 'other';
                 continue;
             }
             $name =
@@ -114,15 +112,13 @@ final class Update extends AbstractUpdate
                 $size = is_int($payload['size'] ?? null) ? max(0, $payload['size']) : 0;
             }
             $result[] = new \diBot\Attachment\Attachment(
-                $attachment['type'] === 'image'
-                    ? 'photo'
-                    : \diBot\Attachment\KindResolver::resolve('', $name),
+                $type === 'image' ? 'photo' : \diBot\Attachment\KindResolver::resolve('', $name),
                 $ref,
                 $url,
                 size: $size,
                 filename: $name
             );
         }
-        return $result;
+        return [$result, $other];
     }
 }

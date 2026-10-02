@@ -226,13 +226,36 @@ final class TransportTest extends TestCase
             }
         }
     }
-    public function testTelegramDeleteWebhookIgnoresUrl(): void
+    public function testTelegramDeleteWebhookRemovesOnlyOwnUrl(): void
     {
-        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => true])]);
+        $info = fn(string $url) => FakeClient::json(['ok' => true, 'result' => ['url' => $url]]);
+        // Свой адрес – снимается.
+        $http = new FakeClient([$info('https://example.com/x'), FakeClient::json(['ok' => true, 'result' => true])]);
         (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+        self::assertCount(2, $http->requests);
+        self::assertStringEndsWith('/getWebhookInfo', $http->requests[0]->url);
+        self::assertStringEndsWith('/deleteWebhook', $http->requests[1]->url);
+        // Чужой или пустой – вебхук другого сервиса не трогаем.
+        foreach (['https://other.example/hook', ''] as $current) {
+            $http = new FakeClient([$info($current)]);
+            (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+            self::assertCount(1, $http->requests, $current);
+        }
+        // Без адреса – снимается любой, без проверки.
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => true])]);
+        (new Telegram(new Config('123:token'), $http))->deleteWebhook();
         self::assertCount(1, $http->requests);
         self::assertStringEndsWith('/deleteWebhook', $http->requests[0]->url);
-        self::assertStringNotContainsString('example.com', $http->requests[0]->body);
+        // Битый ответ getWebhookInfo – ошибка, а не молчаливое «не наш».
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => []])]);
+        try {
+            (new Telegram(new Config('123:token'), $http))->deleteWebhook('https://example.com/x');
+            self::fail('invalid_webhook_info expected');
+        } catch (\diBot\Exception\ApiException $e) {
+            self::assertSame('invalid_webhook_info', $e->reason);
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        (new Telegram(new Config('123:token'), new FakeClient()))->deleteWebhook('http://example.com/x');
     }
     public function testUpdateTypesAreSharedByWebhookAndPolling(): void
     {

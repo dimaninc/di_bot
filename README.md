@@ -170,16 +170,20 @@ MAX has no documented locale in User: `userProfile['language']` is empty when ab
 Do not assume TamTam's `user_locale` field exists in MAX or overwrite a known language
 with this empty value.
 
-`membership` is set only for bot membership events in a chat: `''` for ordinary updates,
-`AbstractUpdate::MEMBERSHIP_STOPPED` (`'stopped'`) or `MEMBERSHIP_STARTED` (`'started'`).
+`membership` is set only when the user of a **private chat** stops (blocks) or returns the
+bot: `''` for ordinary updates, `AbstractUpdate::MEMBERSHIP_STOPPED` (`'stopped'`) or
+`MEMBERSHIP_STARTED` (`'started'`). Group and channel events (the bot added or removed by a
+member) are not reported: MAX has no such events in the subscription, and the field would
+mean different things on the two platforms.
 Such an update has `chatId`, `userId`, `isPrivateChat` and `userProfile`, but no
 `messageId`, text, attachments or callback. Handlers that answer every update must check
 `membership` first: replying to a user who has just stopped the bot fails.
 
-- Telegram `my_chat_member`: `kicked` (user blocked the bot) and `left` map to `stopped`,
-  `member` to `started`. `userId` is the actor from `from`; in groups `isPrivateChat` is
-  false. `administrator`, `creator` and `restricted` are rights changes in groups or
-  channels rather than an unambiguous presence change and are ignored (`null`).
+- Telegram `my_chat_member` in a private chat: the event is a change of presence, not of
+  status. `old_chat_member` and `new_chat_member` are compared (present: `member`,
+  `administrator`, `creator`, `restricted` with `is_member: true`); appearing gives
+  `started`, disappearing (`kicked`, `left`) gives `stopped`, anything else is ignored
+  (`null`), as are events without both statuses.
 - MAX `bot_stopped` maps to `stopped`; `bot_started` keeps the `/start` command and also
   sets `started`. Both require a valid timestamp; their deduplication IDs include the
   event type, so a start and a stop with the same chat, user and timestamp never collide.
@@ -195,9 +199,13 @@ kinds only, never file references or URLs, and is empty for callbacks. Use it to
 - Telegram: `voice`, `audio`, `video`, `video_note`, `sticker`, `animation`, `location`,
   `venue` (as `location`), `contact`, `poll`, `dice` (as `other`). An animation also
   carries `document`; it stays out of `attachments` and is reported once as `animation`.
+  Content without a kind of its own – `story`, `game`, `paid_media`, `invoice`,
+  `giveaway`, `giveaway_winners`, `checklist` – is `other`. The list is explicit: service
+  fields (`new_chat_members`, `pinned_message` and the like) are not content.
 - MAX: attachment types other than `image`, `file` and `inline_keyboard`; `audio`,
   `video`, `sticker`, `location`, `contact` keep their names, `share` and unknown types
-  become `other`. The MAX reference has no separate voice type; voice messages are
+  become `other`, as do `image` and `file` without a token and URL (nothing to download).
+  The MAX reference has no separate voice type; voice messages are
   expected to arrive as `audio`, which is not confirmed live. MAX never yields `voice`,
   `video_note`, `animation` or `poll`.
 
@@ -224,7 +232,9 @@ of other services. `deleteWebhook()` without an argument lists and removes all c
 subscriptions, one request each. When intentionally replacing all endpoints, call it before
 `setWebhook($newUrl)`; this creates a delivery gap if registration fails. Verify
 subscriptions via GET `/subscriptions` after changing the URL. Telegram has exactly one
-webhook per bot and ignores the argument. Custom `AbstractBotApi` subclasses must declare
+webhook per bot: with `$url` it first reads `getWebhookInfo` and removes the webhook only
+if it is that URL, so a webhook of another service the bot was handed to stays (two
+requests); without `$url` it removes any webhook. Custom `AbstractBotApi` subclasses must declare
 `deleteWebhook(?string $url = null): void`.
 Empty token or webhook secret disables processing. Comparison uses `hash_equals`.
 Malformed JSON, handler exceptions, and logger failures still acknowledge the webhook.

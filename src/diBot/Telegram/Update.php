@@ -19,6 +19,16 @@ final class Update extends AbstractUpdate
         'contact' => 'contact',
         'poll' => 'poll',
         'dice' => 'other',
+        // Содержимое без своего вида: иначе сообщение пришло бы пустым. Белый список, а не
+        // «всё незнакомое»: служебные поля (new_chat_members, pinned_message…) содержимым
+        // собеседника не являются.
+        'story' => 'other',
+        'game' => 'other',
+        'paid_media' => 'other',
+        'invoice' => 'other',
+        'giveaway' => 'other',
+        'giveaway_winners' => 'other',
+        'checklist' => 'other',
     ];
 
     public static function fromArray(array $data): ?self
@@ -54,10 +64,8 @@ final class Update extends AbstractUpdate
             $u->text = self::string($msg['text'] ?? ($msg['caption'] ?? ''));
             $u->parseCommand();
             $u->attachments = self::parseAttachments($msg);
-            foreach (array_keys($msg) as $key) {
-                if (isset(self::OTHER_CONTENT[$key]) && is_array($msg[$key])) {
-                    $u->addOtherContent(self::OTHER_CONTENT[$key]);
-                }
+            foreach (self::parseOtherContent($msg) as $kind) {
+                $u->addOtherContent($kind);
             }
         }
         return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
@@ -70,28 +78,60 @@ final class Update extends AbstractUpdate
         }
         $chat = $event['chat'] ?? null;
         $from = $event['from'] ?? null;
-        $member = $event['new_chat_member'] ?? null;
-        if (!is_array($chat) || !is_array($from) || !is_array($member)) {
+        $old = $event['old_chat_member'] ?? null;
+        $new = $event['new_chat_member'] ?? null;
+        if (
+            !is_array($chat) ||
+            !is_array($from) ||
+            !is_array($old) ||
+            !is_array($new) ||
+            !is_string($old['status'] ?? null) ||
+            !is_string($new['status'] ?? null)
+        ) {
             return null;
         }
-        // В личном чате приходят только kicked (бот остановлен) и member (возвращён).
-        // left – бот покинул чат, по смыслу та же остановка. administrator/creator/
-        // restricted – смена прав в группе или канале: присутствие бота они не меняют
-        // однозначно (у restricted оно зависит от is_member), поэтому такие события не отдаём.
-        $u->membership = match ($member['status'] ?? null) {
-            'kicked', 'left' => self::MEMBERSHIP_STOPPED,
-            'member' => self::MEMBERSHIP_STARTED,
-            default => '',
-        };
-        if ($u->membership === '') {
+        // Только личный чат: там событие – решение самого собеседника (остановил или вернул
+        // бота). В группе это добавление или удаление бота кем-то из участников, и у MAX
+        // таких событий в подписке нет – смысл поля на площадках разошёлся бы.
+        if (($chat['type'] ?? '') !== 'private') {
             return null;
         }
+        // Событие – смена присутствия, а не статуса: member → member или повтор kicked ничего
+        // не меняют.
+        $was = self::present($old);
+        $is = self::present($new);
+        if ($was === $is) {
+            return null;
+        }
+        $u->membership = $is ? self::MEMBERSHIP_STARTED : self::MEMBERSHIP_STOPPED;
         $u->chatId = self::string($chat['id'] ?? '');
         $u->userId = self::string($from['id'] ?? '');
-        $u->isPrivateChat = ($chat['type'] ?? '') === 'private';
+        $u->isPrivateChat = true;
         $u->profile($from);
         return $u->updateId !== '' && $u->chatId !== '' && $u->userId !== '' ? $u : null;
     }
+    /** @return list<string> виды содержимого из OTHER_CONTENT в порядке полей сообщения */
+    private static function parseOtherContent(array $message): array
+    {
+        $result = [];
+        foreach (array_keys($message) as $key) {
+            if (isset(self::OTHER_CONTENT[$key]) && is_array($message[$key])) {
+                $result[] = self::OTHER_CONTENT[$key];
+            }
+        }
+        return $result;
+    }
+
+    /** Бот в чате: member, administrator, creator; restricted – по is_member. */
+    private static function present(array $member): bool
+    {
+        return match ($member['status'] ?? null) {
+            'member', 'administrator', 'creator' => true,
+            'restricted' => ($member['is_member'] ?? false) === true,
+            default => false,
+        };
+    }
+
     private static function parseAttachments(array $message): array
     {
         $result = [];

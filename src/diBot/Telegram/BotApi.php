@@ -198,9 +198,24 @@ class BotApi extends AbstractBotApi
         ]);
     }
 
-    /** У бота Telegram ровно один вебхук, поэтому $url не используется. */
+    /**
+     * У бота Telegram вебхук один. С $url снимается, только если стоит именно он
+     * (getWebhookInfo): иначе «сними мою подписку» снял бы вебхук другого сервиса, которому
+     * бота передали. Без $url – снимается любой.
+     */
     public function deleteWebhook(?string $url = null): void
     {
+        if ($url !== null) {
+            Config::assertHttpsUrl($url);
+            $info = $this->request('getWebhookInfo');
+            $current = $info['result']['url'] ?? null;
+            if (!is_string($current)) {
+                throw new ApiException(200, 'invalid_webhook_info');
+            }
+            if ($current !== $url) {
+                return;
+            }
+        }
         $this->request('deleteWebhook', ['drop_pending_updates' => false]);
     }
 

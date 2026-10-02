@@ -95,15 +95,18 @@ final class UpdateTest extends TestCase
         self::assertSame('go', $u->payload);
         self::assertTrue($u->isCallback());
     }
-    public static function telegramMembership(string $status, string $chatType = 'private'): array
-    {
+    public static function telegramMembership(
+        string $status,
+        string $chatType = 'private',
+        array $old = ['status' => 'member']
+    ): array {
         return [
             'update_id' => 30,
             'my_chat_member' => [
                 'chat' => ['id' => 501, 'type' => $chatType],
                 'from' => ['id' => 77, 'first_name' => 'Имя', 'language_code' => 'ru'],
                 'date' => 1700000000,
-                'old_chat_member' => ['status' => 'member', 'user' => ['id' => 1]],
+                'old_chat_member' => $old + ['user' => ['id' => 1]],
                 'new_chat_member' => ['status' => $status, 'user' => ['id' => 1]],
             ],
         ];
@@ -126,22 +129,37 @@ final class UpdateTest extends TestCase
         self::assertSame([], $u->otherContent);
         self::assertSame(
             AbstractUpdate::MEMBERSHIP_STARTED,
-            Telegram::fromArray(self::telegramMembership('member'))->membership
+            Telegram::fromArray(self::telegramMembership('member', old: ['status' => 'kicked']))->membership
         );
         self::assertSame(
             AbstractUpdate::MEMBERSHIP_STOPPED,
             Telegram::fromArray(self::telegramMembership('left'))->membership
         );
-        $group = Telegram::fromArray(self::telegramMembership('member', 'group'));
-        self::assertFalse($group->isPrivateChat);
-        self::assertSame(AbstractUpdate::MEMBERSHIP_STARTED, $group->membership);
-        foreach (['administrator', 'creator', 'restricted', '', 'unknown'] as $status) {
-            self::assertNull(Telegram::fromArray(self::telegramMembership($status, 'group')));
+        // Событие – смена присутствия, а не статуса.
+        foreach (
+            [
+                ['member', ['status' => 'member']],
+                ['kicked', ['status' => 'left']],
+                ['member', ['status' => 'administrator']],
+                ['member', ['status' => 'restricted', 'is_member' => true]],
+            ]
+            as [$new, $old]
+        ) {
+            self::assertNull(Telegram::fromArray(self::telegramMembership($new, old: $old)), json_encode($old) . " -> $new");
+        }
+        self::assertSame(
+            AbstractUpdate::MEMBERSHIP_STARTED,
+            Telegram::fromArray(self::telegramMembership('member', old: ['status' => 'restricted', 'is_member' => false]))->membership
+        );
+        // Группы и каналы – не события собеседника: не отдаются (у MAX их нет в подписке).
+        foreach (['group', 'supergroup', 'channel'] as $type) {
+            self::assertNull(Telegram::fromArray(self::telegramMembership('kicked', $type)), $type);
+            self::assertNull(Telegram::fromArray(self::telegramMembership('member', $type, ['status' => 'left'])), $type);
         }
         $raw = self::telegramMembership('kicked');
         unset($raw['my_chat_member']['new_chat_member']['status']);
-        self::assertNull(Telegram::fromArray($raw));
-        foreach (['chat', 'from', 'new_chat_member'] as $key) {
+        self::assertNull(Telegram::fromArray($raw), 'нет статуса – битое событие');
+        foreach (['chat', 'from', 'old_chat_member', 'new_chat_member'] as $key) {
             $raw = self::telegramMembership('kicked');
             $raw['my_chat_member'][$key] = 'x';
             self::assertNull(Telegram::fromArray($raw));
@@ -197,6 +215,7 @@ final class UpdateTest extends TestCase
             'video' => ['file_id' => 'vi'],
             'video_note' => ['file_id' => 'vn'],
             'unknown_kind' => ['x' => 1],
+            'new_chat_members' => [['id' => 1]],
             'game' => 'not-an-object',
         ];
         self::assertSame(
@@ -221,6 +240,12 @@ final class UpdateTest extends TestCase
         $u = Telegram::fromArray($raw);
         self::assertSame(['animation'], $u->otherContent);
         self::assertSame([], $u->attachments);
+        // Содержимое без своего вида – other, а не пустое сообщение.
+        foreach (['story', 'game', 'paid_media', 'invoice', 'giveaway', 'giveaway_winners', 'checklist'] as $key) {
+            $raw = self::telegram('');
+            $raw['message'][$key] = ['id' => 1];
+            self::assertSame(['other'], Telegram::fromArray($raw)->otherContent, $key);
+        }
         $raw = self::telegram('');
         $raw['message']['photo'] = [['file_id' => 'p', 'width' => 1, 'height' => 1]];
         $raw['message']['voice'] = 'not-an-object';
@@ -260,6 +285,12 @@ final class UpdateTest extends TestCase
             $u->otherContent
         );
         self::assertCount(2, $u->attachments);
+        // Картинка и файл без токена и ссылки – other, а не пустое сообщение.
+        $raw2 = self::max();
+        $raw2['message']['body']['attachments'] = [['type' => 'image', 'payload' => []], ['type' => 'file']];
+        $u = Max::fromArray($raw2);
+        self::assertSame([], $u->attachments);
+        self::assertSame(['other'], $u->otherContent);
         $raw['update_type'] = 'message_callback';
         $raw['callback'] = ['callback_id' => 'c', 'payload' => 'go', 'user' => ['user_id' => 19]];
         $u = Max::fromArray($raw);

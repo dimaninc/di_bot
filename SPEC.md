@@ -68,10 +68,12 @@ src/diBot/
 `isPrivateChat`, `text`, `command`, `commandPayload`, `callbackId`, `payload`,
 `userProfile` (username, имя, фамилия, язык), `attachments`, `otherContent`, `membership`.
 
-`membership` выставляется только для событий членства бота в чате: `stopped`
-(Telegram `my_chat_member` со статусом `kicked`/`left`, MAX `bot_stopped`) или `started`
-(`member`, MAX `bot_started`). `otherContent` – виды содержимого, которое пакет не отдаёт
-вложениями (голосовое, видео, стикер и т. п.): только вид, без ссылок на файлы.
+`membership` выставляется только в личном чате, когда собеседник остановил или вернул бота:
+`stopped` (Telegram `my_chat_member` – бот был в чате и пропал, MAX `bot_stopped`) или
+`started` (не было – появился, MAX `bot_started`). Сравниваются старый и новый статусы;
+групповые события не отдаются. `otherContent` – виды содержимого, которое пакет не отдаёт
+вложениями (голосовое, видео, стикер и т. п.; содержимое без своего вида – `other`): только
+вид, без ссылок на файлы.
 Подписка на типы апдейтов – одна константа `UPDATE_TYPES` адаптера на вебхук и polling.
 
 Разбор `/start <payload>` и `/command` делается в базовом классе: deep-link payload
