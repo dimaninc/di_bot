@@ -116,7 +116,8 @@ final class Update extends AbstractUpdate
                 $size = is_int($payload['size'] ?? null) ? max(0, $payload['size']) : 0;
             }
             $result[] = new \diBot\Attachment\Attachment(
-                $type === 'image' ? 'photo' : \diBot\Attachment\KindResolver::resolve('', $name),
+                // Вид – как отправлено: файл остаётся документом, даже если это картинка.
+                $type === 'image' ? 'photo' : 'document',
                 $ref,
                 $url,
                 size: $size,

@@ -3,7 +3,11 @@ namespace diBot\Attachment;
 
 final class KindResolver
 {
-    /** Описательный тип; решение об inline-отдаче файла принимает приложение. */
+    /**
+     * Описательный тип по MIME или расширению; решение об inline-отдаче файла принимает
+     * приложение. Не способ отправки: в sendFileId() и Media::kind не передавать – файл,
+     * помеченный здесь photo, Telegram отправит sendPhoto и откажет, а MAX сочтёт картинкой.
+     */
     public static function resolve(string $mime, string $filename = ''): string
     {
         $mime = strtolower(trim(explode(';', $mime)[0]));

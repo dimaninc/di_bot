@@ -1,6 +1,7 @@
 <?php
 namespace diBot\Tests;
 
+use diBot\Attachment\KindResolver;
 use diBot\Config;
 use diBot\Exception\{ApiException, DownloadException};
 use diBot\Http\Response;
@@ -64,10 +65,22 @@ final class AttachmentTest extends TestCase
         $items = MaxUpdate::fromArray($raw)->attachments;
         self::assertCount(3, $items);
         self::assertSame('123', $items[0]->ref);
-        self::assertSame('photo', $items[1]->kind);
+        self::assertSame('photo', $items[0]->kind);
+        // Картинка, отправленная файлом, – документ: вид как отправлено, а не по расширению.
+        self::assertSame('document', $items[1]->kind);
         self::assertSame('scan.PNG', $items[1]->filename);
         self::assertSame(33, $items[1]->size);
         self::assertSame('document', $items[2]->kind);
+    }
+    public function testKindResolverDescribesByMimeOrExtension(): void
+    {
+        self::assertSame('photo', KindResolver::resolve('image/heic'));
+        self::assertSame('photo', KindResolver::resolve('Image/PNG; charset=binary'));
+        self::assertSame('photo', KindResolver::resolve('application/octet-stream', 'x.TIFF'));
+        self::assertSame('photo', KindResolver::resolve('', 'scan.jpeg'));
+        self::assertSame('document', KindResolver::resolve('application/pdf', 'x.png'));
+        self::assertSame('document', KindResolver::resolve('', 'notes.txt'));
+        self::assertSame('document', KindResolver::resolve(''));
     }
     public function testTelegramDownloadsViaConfiguredProxyWithBoundedBinaryRequest(): void
     {

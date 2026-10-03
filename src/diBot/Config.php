@@ -14,7 +14,9 @@ readonly final class Config
         public int $uploadTimeout = 60,
         public bool $retryMediaInCli = false,
         public int $maxDownloadBytes = 5 * 1024 * 1024,
-        public int $downloadTimeout = 30
+        public int $downloadTimeout = 30,
+        // Telegram setWebhook max_connections (1–100); null – не передаётся, у Telegram это 40.
+        public ?int $webhookMaxConnections = null
     ) {
         foreach ([$token, $proxySecret, $webhookSecret] as $secret) {
             if (preg_match('/[\x00-\x20\x7f]/', $secret)) {
@@ -31,6 +33,9 @@ readonly final class Config
         }
         if ($maxDownloadBytes < 1 || $maxDownloadBytes > 20 * 1024 * 1024) {
             throw new \InvalidArgumentException('Download limit must be between 1 byte and 20 MiB');
+        }
+        if ($webhookMaxConnections !== null && ($webhookMaxConnections < 1 || $webhookMaxConnections > 100)) {
+            throw new \InvalidArgumentException('Webhook max connections must be between 1 and 100');
         }
         if ($caBundle !== null && !is_readable($caBundle)) {
             throw new \InvalidArgumentException('CA bundle is not readable');

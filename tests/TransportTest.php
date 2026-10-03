@@ -294,6 +294,21 @@ final class TransportTest extends TestCase
         $batch = (new Telegram(new Config('123:token'), $http))->getUpdates('1');
         self::assertSame($item, $batch->updates[0]->raw);
     }
+    public function testWebhookMaxConnectionsIsConfigured(): void
+    {
+        $http = new FakeClient([FakeClient::json(['ok' => true, 'result' => true])]);
+        $api = new Telegram(new Config('123:token', webhookSecret: 'secret', webhookMaxConnections: 1), $http);
+        $api->setWebhook('https://example.com/hook');
+        self::assertSame(1, json_decode($http->requests[0]->body, true)['max_connections']);
+        foreach ([0, 101] as $bad) {
+            try {
+                new Config('123:token', webhookMaxConnections: $bad);
+                self::fail("$bad accepted");
+            } catch (\InvalidArgumentException) {
+                self::assertTrue(true);
+            }
+        }
+    }
     public function testUpdateTypesAreSharedByWebhookAndPolling(): void
     {
         self::assertSame(['message', 'callback_query', 'my_chat_member'], Telegram::UPDATE_TYPES);
@@ -306,6 +321,11 @@ final class TransportTest extends TestCase
         ]);
         $api = new Telegram($config, $http);
         $api->setWebhook('https://example.com/hook');
+        self::assertArrayNotHasKey(
+            'max_connections',
+            json_decode($http->requests[0]->body, true),
+            'без настройки – умолчание Telegram'
+        );
         $api->getUpdates('1');
         foreach ($http->requests as $request) {
             self::assertSame(

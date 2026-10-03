@@ -191,11 +191,17 @@ class BotApi extends AbstractBotApi
         ) {
             throw new \InvalidArgumentException('Telegram webhook secret is missing or invalid');
         }
-        return $this->request('setWebhook', [
+        $body = [
             'url' => $url,
             'secret_token' => $this->config->webhookSecret,
             'allowed_updates' => self::UPDATE_TYPES,
-        ]);
+        ];
+        // Политика приложения, а не библиотеки: 1 – апдейты одного чата не обгоняют друг
+        // друга, но медленный апдейт задерживает все чаты бота.
+        if ($this->config->webhookMaxConnections !== null) {
+            $body['max_connections'] = $this->config->webhookMaxConnections;
+        }
+        return $this->request('setWebhook', $body);
     }
 
     /**
