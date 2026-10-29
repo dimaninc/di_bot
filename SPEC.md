@@ -1,6 +1,6 @@
 # Пакет `dimaninc/di_bot`
 
-Транспортный слой для ботов Telegram и MAX, распространяемый как пакет Composer.
+Транспортный слой для ботов Telegram, MAX и Instagram, распространяемый как пакет Composer.
 Контракт реализованной версии описан в [README.md](README.md).
 
 ## 1. Назначение
@@ -52,6 +52,12 @@ src/diBot/
   Telegram/Update.php
   Max/BotApi.php
   Max/Update.php
+  Instagram/BotApi.php      Send API, private replies, комментарии, профиль, подписка аккаунта
+  Instagram/Update.php      одно событие вебхука: личка или комментарий
+  Instagram/Webhook.php     вебхук приложения: подтверждение, подпись, нарезка на события
+  Instagram/Auth.php        Business Login: ссылка входа, обмен кода, долгоживущий токен
+  Instagram/Errors.php      классификация ошибок Graph API
+  Instagram/Token.php, Comment.php, MediaItem.php, Page.php, UserProfile.php   DTO
   Outgoing/Media.php        DTO файла: вид, mime, размер, url, локальный путь, подпись
   Outgoing/Policy.php       решение «как отправлять»: по url, загрузкой или отказ
   Outgoing/Decision.php
@@ -206,7 +212,36 @@ MAX дообрабатывает файл после ответа хранили
 
 ### Instagram
 
-Платформа зарезервирована в перечислении `Platform`; адаптер пока не реализован.
+Instagram API with Instagram Login (`graph.instagram.com`), версия Graph API –
+константа `GRAPH_VERSION` (`v26.0`). Контракт для приложения – README, «Instagram».
+
+- **Токен** – долгоживущий токен пользователя Instagram, только заголовком
+  `Authorization: Bearer`, не в URL. Прокси (Cloudflare Worker) – как у Telegram:
+  `baseUrl` плюс обязательный `X-Proxy-Auth`. Получение и обновление токена – `Auth`,
+  хранение и график обновления – приложение.
+- **Вебхук – уровня приложения Meta**, а не бота: один адрес на все аккаунты, задаётся в
+  панели Meta. `Webhook` подтверждает адрес (`hub.challenge`), проверяет
+  `X-Hub-Signature-256` и режет тело на самостоятельные события с `entry_id`; приложение
+  хранит событие строкой и выбирает бота по `entry_id`. `AbstractController` для
+  Instagram не используется: `webhook()` ничего не обрабатывает, `poll()` отказывает до
+  `deleteWebhook()` – иначе аккаунт отписался бы от событий.
+- **`setWebhook()` подписывает аккаунт** (`POST /me/subscribed_apps`) на поля
+  `UPDATE_TYPES`, адрес не передаётся. Идентификатор для маршрутизации – `user_id` из
+  `/me` (`getMe()['account_id']`), а не `id`.
+- **Текст** – до 1000 байт UTF-8, а не единиц UTF-16. Рядов кнопок нет: до 3 кнопок –
+  шаблон button, 4–13 callback – quick replies, иначе ошибка вызывающего кода.
+- **Медиа только по URL**: файл скачивает сама Meta, через прокси идёт только JSON.
+  `Policy` для Instagram выбирает URL или отказ; загрузки нет. Подписей нет
+  (`CAPTION_MAX_UNITS = 0`): непустой текст даёт `caption_too_long`, и `Sender`
+  отправляет только текст – прежний контракт, без автоматического разделения.
+- **Нет** `editMessage`, `setCommands`, `getUpdates`, `sendFileId` (многоразовые
+  attachment_id выдаёт только API страниц Facebook) – `ApiException` `unsupported`.
+  Команд и `/start` нет.
+- **Ошибки** – по `code`/`error_subcode`, текст Meta наружу не выходит. Новые причины:
+  `window_closed` (вне окна 24 часа), `reply_unavailable` (комментарий не годится для
+  private reply), `consent_required` (профиль без согласия собеседника),
+  `invalid_token`, `unsupported`. Задержка throttling – не меньше 60 секунд: лимиты Meta
+  считаются окнами в часы.
 
 ## 7. Версионирование
 
@@ -219,6 +254,8 @@ MAX дообрабатывает файл после ответа хранили
 В пакете покрываются:
 
 - разбор апдейтов Telegram и MAX в общий формат, включая callback и команды с payload;
+- Instagram: подпись и нарезка вебхука, разбор событий, формы запросов, классификация
+  ошибок, маршрутизация через прокси, отсутствие токена в URL, журнале и исключениях;
 - сборка клавиатур под лимиты платформ, обрезка подписей по границам UTF-16;
 - `Outgoing\Policy` – выбор транспорта и отказы по размеру и длине подписи;
 - срок годности корневых сертификатов в бандле MAX – тест должен начать падать заранее,

@@ -1,6 +1,6 @@
 # di_bot
 
-PHP 8.3 transport for Telegram and MAX. No database, environment lookup, or CMS dependency.
+PHP 8.3 transport for Telegram, MAX and Instagram. No database, environment lookup, or CMS dependency.
 
 Releases are git tags (`0.1.0`, `0.2.0`, …); changes and upgrade notes are in the GitHub
 release notes. Applications pin a released version, for example `"dimaninc/di_bot": "^0.2"`.
@@ -320,7 +320,7 @@ exceptions where media is sent; they no longer trigger an immediate text fallbac
 Polling now skips handler failures, and custom `AbstractBotApi` subclasses must implement
 `downloadAttachment()` and `rateLimitDelay()`. Custom HTTP clients should honor
 `Request::maxResponseBytes` and the public-download guard and return lowercase keys
-in `Response::headers`. Instagram, outgoing video and button intents remain unsupported.
+in `Response::headers`. Outgoing video and button intents remain unsupported.
 
 ## Limits and compatibility
 
@@ -330,9 +330,151 @@ MAX link rows are split at 3 buttons, callback-only rows at 7; keyboards have at
 30 rows and 210 buttons. Telegram uses 8 per row and 100 total as a conservative policy.
 The caller must paginate when the total limit is exceeded.
 
-Instagram is reserved in `Platform`, but has no adapter. No business logic or storage
-implementation is included. `setWebhook()` does not choose a production URL: that is
+No business logic or storage implementation is included. `setWebhook()` does not choose a production URL: that is
 the application's responsibility.
+
+## Instagram
+
+`Platform::Instagram` uses the Instagram API with Instagram Login (`graph.instagram.com`,
+Graph API `Instagram\BotApi::GRAPH_VERSION`, now `v26.0`). `Config::token` is the
+account's long-lived Instagram user token, sent only as `Authorization: Bearer`, never in
+the URL. A custom `baseUrl` (a Worker proxy) requires `proxySecret`, sent as
+`X-Proxy-Auth`, as for Telegram. The bot never writes first: a message is allowed within
+24 hours of the user's last message, or as one private reply to a comment.
+
+### Webhook, events and routing
+
+The webhook URL is one per Meta app and is set in the Meta dashboard, not per bot.
+`Instagram\Webhook` replaces `AbstractController`: its `webhook()` ignores Instagram, and
+`poll()` throws `unsupported` before touching the store or the subscription.
+
+```php
+use diBot\Instagram\Webhook;
+use diBot\Exception\SignatureException;
+
+$webhook = new Webhook($appSecret, $verifyToken);
+// GET: PHP's $_GET (hub_mode, …) and raw names (hub.mode) both work.
+$challenge = $webhook->challenge($_GET); // echo as text/plain; null → 403
+// POST: verify X-Hub-Signature-256, store one row per event, answer 200.
+try {
+    $signature = $_SERVER['HTTP_X_HUB_SIGNATURE_256'] ?? '';
+    foreach ($webhook->events($rawBody, $signature) as $event) {
+        $store->save($event['entry_id'], json_encode($event));
+    }
+} catch (SignatureException) {
+    // not from Meta: store nothing
+}
+```
+
+`events()` rejects bodies over 1 MiB (`LengthException`) and a missing or wrong
+signature (`SignatureException`); invalid JSON or a non-`instagram` object gives `[]`.
+Each event is self-contained: `object`, `entry_id` (the business account that received
+it), `time`, and either `messaging` (one item of `entry[].messaging`) or `change` (one
+item of `entry[].changes`). The worker selects the bot by `entry_id`, then calls
+`Platform::Instagram->parse($event)` (an `Instagram\Update` or `null`). Meta retries
+deliveries for up to 36 hours: deduplicate by `updateId`.
+
+`Instagram\Update` adds `accountId` (= `entry_id`) and `comment` (`Instagram\Comment` for
+comment events). `chatId` and `userId` are the user's IGSID; `isPrivateChat` is `true`.
+There are no commands: `/start` stays plain text.
+
+| Event | Fields | `updateId` |
+|---|---|---|
+| DM text | `text`, `messageId` | `message:<mid>` |
+| quick reply | `text` (button title) and `payload`; not a callback | `message:<mid>` |
+| postback (template button) | `payload`, `callbackId` = postback mid | `postback:<mid>` |
+| image / PDF | `attachments` with the CDN `url`, empty `ref` | `message:<mid>` |
+| `comments` / `live_comments` | `text`, `comment`, `userProfile['username']` | `comment:<id>` |
+
+Audio and video are reported in `otherContent`; shared posts, reels, stories and other
+types as `other`. Echoes, read receipts, reactions, edits, deletions, referrals and events
+from the business account itself (including its own replies under a post) give `null`.
+Webhook comments carry no timestamp: `comment->timestamp` is the event `time`.
+Attachment URLs are signed CDN links: download them promptly with
+`downloadAttachment('', $url)` (public download guard, no credentials).
+
+### Accounts and OAuth
+
+`getMe()` returns `['account_id' => …, 'username' => …, 'app_scoped_id' => …]`.
+`account_id` is the `user_id` of `/me` and equals the webhook `entry_id`: store it to
+route events. `setWebhook($url)` ignores `$url` and subscribes the account to
+`UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
+POST `/me/subscribed_apps`; `deleteWebhook()` sends DELETE `/me/subscribed_apps`.
+
+`Instagram\Auth` implements Business Login. The application keeps the state, stores tokens
+encrypted and schedules refreshes:
+
+```php
+$auth = new Auth($appId, $appSecret, $redirectUri, baseUrl: $proxy, proxySecret: $secret);
+$url = $auth->authorizeUrl($state, [
+    'instagram_business_basic',
+    'instagram_business_manage_messages',
+    'instagram_business_manage_comments',
+]);
+$short = $auth->exchangeCode($code); // 1 hour; a trailing "#_" is stripped
+$long = $auth->longLived($short->accessToken); // 60 days
+$long = $auth->refresh($long->accessToken); // once the token is at least 24 hours old
+```
+
+`Token` has `accessToken`, `userId` (code exchange only), `expiresIn` (seconds, 0 when
+unknown) and `permissions`; `var_dump` redacts the token. Refresh well before 60 days: an
+expired token cannot be refreshed and needs a new login. Meta takes the parameters of the
+token endpoints, including the app secret and the token, only in the query string; the
+library never logs URLs and scrubs client errors. With a proxy, all calls go to `baseUrl`:
+the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
+`api.instagram.com`), everything else to its usual `graph.instagram.com` path.
+
+### Sending
+
+- Text is at most 1000 **bytes** of UTF-8 (`TEXT_MAX_BYTES`, about 500 Cyrillic letters).
+- Keyboards have no rows. Up to 3 buttons become a button template (callback → `postback`,
+  link → `web_url`; text up to 640 characters). 4–13 callback buttons become quick
+  replies. More than 3 buttons with a link, or more than 13 buttons, raise
+  `InvalidArgumentException`. Titles are cut to 20 UTF-16 units; payloads are at most
+  1000 bytes. The Instagram web client shows neither buttons nor templates, and quick
+  replies are not shown on desktop: also parse typed answers.
+- `sendPrivateReply($commentId, $text, $keyboard)` sends the one private reply allowed per
+  comment (within 7 days; for live comments only during the broadcast).
+  `replyToComment($commentId, $text)` posts a public reply and returns `['id' => …]`.
+- `getMedia($after, $limit ≤ 100)` and `getComments($mediaId, $after, $limit ≤ 50)` return
+  `Instagram\Page` (`items`, `next` cursor or `null`) of `MediaItem` (`id`, `caption`,
+  `mediaType`, `permalink`, `mediaUrl`, `thumbnailUrl`, `timestamp`) and `Comment` (`id`,
+  `mediaId`, `parentId`, `text`, `fromId`, `fromUsername`, `timestamp`, `live`).
+  Comments are top-level only, newest first.
+- `getUserProfile($igsid)` returns `UserProfile` (`id`, `username`, `name`,
+  `followsBusiness`, `businessFollowsUser`, `isVerified`, `followerCount`); follow flags
+  are `null` when absent. Without the user's consent (a message, a button or an ice
+  breaker; a comment is not enough) it throws `consent_required`: ask the user to press a
+  button, then retry.
+- Media goes only by public URL; Meta downloads it. `Policy` chooses `Url` for PNG/JPEG
+  photos up to 8 MiB and PDF documents up to 25 MiB with `publicUrl`; otherwise it refuses
+  with `too_large`, `unsupported_type` or `no_public_url`. Instagram has no captions, so
+  `Sender` with nonempty text gets `caption_too_long` and sends only the text with its
+  keyboard. To send a file, call `Sender::send($chatId, '', $factory)` or `sendMedia()`
+  without caption and keyboard, then send the text separately.
+- `sendFileId()` (reusable attachment IDs need the Facebook Page API), `editMessage()`,
+  `setCommands()` and `getUpdates()` throw `ApiException(reason: 'unsupported')`.
+  `answerCallback()` is a local no-op.
+
+### Errors
+
+Meta's error text never reaches exceptions or logs. Classification by `error.code` and
+`error_subcode`:
+
+| Meta | `reason` / flag |
+|---|---|
+| 4, 17, 32, 613, 80002, 80006; HTTP 429 | `rate_limit`; delay from `X-Business-Use-Case-Usage` (minutes) or `Retry-After`, at least 60 s |
+| 10 / 2018278, 10 / 2534022 | `window_closed` – outside the 24-hour window |
+| 100 / 2534025 | `reply_unavailable` – the comment is not eligible for a private reply |
+| message "User consent is required…" (no documented code) | `consent_required` |
+| 190 | `invalid_token` – refresh or reconnect |
+| 551, subcode 2018108 | `blocked` flag |
+| HTTP 5xx | `api_error`, delivery uncertain |
+
+613 with subcodes 2018338 (flagged as abusive) and 1893016 is not throttling. A repeated
+private reply or one older than 7 days has no documented code and may surface as plain
+`api_error`. Published limits: 100 sends per second per account (10 for audio and video)
+and 750 private replies per hour for posts and reels.
 
 ## Development
 
@@ -358,4 +500,14 @@ Sources checked on 2026-09-28: [Telegram Bot API](https://core.telegram.org/bots
 [MAX webhook removal](https://dev.max.ru/docs-api/methods/DELETE/subscriptions),
 [MAX message editing](https://dev.max.ru/docs-api/methods/PUT/messages),
 [MAX callback answers](https://dev.max.ru/docs-api/methods/POST/answers).
+Instagram, checked on 2026-10-29:
+[messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api),
+[private replies](https://developers.facebook.com/documentation/instagram-platform/private-replies),
+[webhooks](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup),
+[webhook examples](https://developers.facebook.com/documentation/instagram-platform/webhooks/examples),
+[Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login),
+[tokens](https://developers.facebook.com/docs/instagram-platform/reference/access_token),
+[user profile](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/user-profile),
+[comment moderation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/comment-moderation),
+[error codes](https://developers.facebook.com/docs/messenger-platform/error-codes).
 [Package specification](SPEC.md).

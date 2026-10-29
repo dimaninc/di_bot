@@ -3,7 +3,7 @@
 Первый релиз выпускается после ревью и слияния PR. Unit-тесты используют синтетические
 ответы и проверяют поведение пакета, а не доступность функций живого API.
 
-Автоматическая проверка: 91 тест, 603 проверки; Composer validate и PHP lint проходят.
+Автоматическая проверка: 137 тестов, 1040 проверок; Composer validate и PHP lint проходят.
 Десять тестов из `SecondReviewTest` также запускались на исходном коде до правок
 и воспроизвели прежние дефекты.
 
@@ -71,8 +71,74 @@ TLS проверен системным набором CA, IP соединени
 - [ ] При естественном throttling проверить статус и задержку. Не создавать нагрузку
   на API ради получения 429.
 
+## Instagram: приёмка на живом приложении Meta
+
+Нужны тестовое Meta-приложение, Professional-аккаунт и второй аккаунт-собеседник.
+Факты ниже взяты из справочника Meta (29.10.2026) или не подтверждены им; до проверки
+это допущения адаптера, а не гарантии.
+
+Сеть и доступ:
+
+- [ ] Запрос к `graph.instagram.com` через Worker отвечает API Meta, а не ошибкой
+  доступа; прямой доступ с боевого сервера – для справки.
+- [ ] Хватает ли Standard Access для собственного аккаунта; для `comments` и
+  `live_comments` справочник требует Advanced Access и приложение в режиме Live.
+- [ ] Обмен кода через Worker (`/oauth/access_token` → `api.instagram.com`): форма
+  `application/x-www-form-urlencoded` принимается (в справочнике пример multipart), ответ
+  плоский или в `data[]` – разбираются оба.
+- [ ] `/access_token` и `/refresh_access_token` работают без версии в пути; принимают ли
+  они токен заголовком вместо query – не проверено, сейчас секреты идут в query, как в
+  справочнике.
+
+Вебхук:
+
+- [ ] Каким секретом подписан `X-Hub-Signature-256`: App Secret из «Настройки → Основное»
+  или Instagram app secret из настроек Business Login. Справочник называет App Secret,
+  но для Instagram Login это не подтверждено. Проверить кнопкой «Test» и живым сообщением.
+- [ ] Форма живых событий совпадает с примерами: `entry.id` = `user_id` из `/me`,
+  `messaging[]` для лички, `changes[]` для комментариев; у комментария нет `parent_id` в
+  примере Instagram Login – проверить ответ под комментарием. Тестовая отправка из панели
+  может приходить в `changes` с полем `messages` – такие события адаптер пропускает.
+- [ ] `setWebhook()` (`POST /me/subscribed_apps`) включает доставку; `DELETE
+  /me/subscribed_apps` в справочнике Instagram Login не описан – проверить, что он
+  отписывает аккаунт и что повтор не ошибка.
+- [ ] Эхо своих сообщений приходит с `is_echo` и отбрасывается; ответ аккаунта под постом
+  не запускает бота повторно.
+
+Отправка:
+
+- [ ] Private reply с quick replies и с шаблоном button: в справочнике пример только с
+  текстом.
+- [ ] Private reply на комментарий, найденный через `getComments()`, а не пришедший
+  вебхуком.
+- [ ] Повторный private reply и ответ на комментарий старше 7 дней: зафиксировать
+  `code`/`error_subcode` (не текст) – сейчас документирован только 100/2534025
+  (`reply_unavailable`), остальное станет `api_error`.
+- [ ] Сообщение вне окна 24 часа: ожидается 10/2018278 или 10/2534022 (`window_closed`).
+- [ ] `getUserProfile()` сразу после нажатия кнопки в ответе на private reply возвращает
+  `is_user_follow_business`; без согласия – текст «User consent is required…»
+  (`consent_required`), код не документирован – записать фактический.
+- [ ] Кириллические quick replies (20 символов) и шаблон button на телефоне; веб-версия и
+  десктоп кнопок не показывают – убедиться, что текст шаблона там виден.
+- [ ] Лимит payload quick reply и postback: 1000 байт взят у Messenger, для Instagram не
+  опубликован.
+- [ ] Отправка фото и PDF по URL с публичного хоста приложения (Meta скачивает файл из-за
+  рубежа); форма `attachments: [...]` для картинки и `attachment` для файла.
+- [ ] `getMedia()` возвращает `caption`: справочник помечает поле «только Facebook Login»;
+  если Meta ответит ошибкой несуществующего поля – убрать его из запроса.
+- [ ] Пагинация `getMedia()`/`getComments()` курсором `after`, максимум `limit` (50 у
+  комментариев документирован, 100 у медиа – политика библиотеки).
+- [ ] Throttling: код и заголовок `X-Business-Use-Case-Usage` при естественном
+  достижении лимита; HTTP 429 Meta не документирует. Нагрузку ради 429 не создавать.
+- [ ] Скачивание вложения из лички по ссылке CDN (`lookaside.fbsbx.com`) с боевого
+  сервера; срок жизни ссылки не документирован.
+
 ## Источники
 
+- [Instagram: Messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api)
+- [Instagram: вебхуки](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup)
+- [Instagram: Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login)
+- [Messenger Platform: коды ошибок](https://developers.facebook.com/docs/messenger-platform/error-codes)
 - [MAX: регистрация подписки и секрет](https://dev.max.ru/docs-api/methods/POST/subscriptions)
 - [MAX: редактирование сообщения](https://dev.max.ru/docs-api/methods/PUT/messages)
 - [MAX: ответы на callback](https://dev.max.ru/docs-api/methods/POST/answers)
