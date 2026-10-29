@@ -15,14 +15,13 @@ readonly final class Keyboard
      */
     public function render(Platform $platform): array
     {
-        $class = match ($platform) {
-            Platform::Telegram => Telegram\BotApi::class,
-            Platform::Max => Max\BotApi::class,
-            Platform::Instagram => Instagram\BotApi::class,
-        };
         if ($platform === Platform::Instagram) {
             return $this->instagram();
         }
+        $class = match ($platform) {
+            Platform::Telegram => Telegram\BotApi::class,
+            Platform::Max => Max\BotApi::class,
+        };
         $rows = [];
         $total = 0;
         foreach ($this->rows as $row) {

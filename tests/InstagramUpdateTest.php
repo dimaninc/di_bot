@@ -171,7 +171,7 @@ final class InstagramUpdateTest extends TestCase
         self::assertSame('comment:17900000000000001', $u->updateId);
         self::assertSame(self::USER, $u->chatId);
         self::assertSame(self::USER, $u->userId);
-        self::assertTrue($u->isPrivateChat);
+        self::assertFalse($u->isPrivateChat);
         self::assertSame('хочу гайд', $u->text);
         self::assertSame('client', $u->userProfile['username']);
         self::assertSame('', $u->command);

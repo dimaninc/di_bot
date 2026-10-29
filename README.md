@@ -362,8 +362,10 @@ try {
         $store->save($event['entry_id'], json_encode($event));
     }
     http_response_code(200);
-} catch (SignatureException | \LengthException) {
-    // not from Meta or too large: store nothing, still answer 200
+} catch (SignatureException | \LengthException $e) {
+    // not from Meta or too large: store nothing, still answer 200 – but log it: a wrong
+    // app secret makes every event fail here, and the log is the only trace
+    $logger->warning('Instagram webhook rejected', ['reason' => $e::class]);
     http_response_code(200);
 }
 // Only a failure to store (e.g. the DB is down) may answer 5xx, so that Meta redelivers.
@@ -380,11 +382,12 @@ item of `entry[].changes`). The worker selects the bot by `entry_id`, then calls
 deliveries for up to 36 hours: deduplicate by `updateId`.
 
 `Instagram\Update` adds `accountId` (= `entry_id`) and `comment` (`Instagram\Comment` for
-comment events). `chatId` and `userId` are the user's IGSID; `isPrivateChat` is `true`.
-There are no commands: `/start` stays plain text.
+comment events). `chatId` and `userId` are the user's IGSID; `isPrivateChat` is `true`
+for DM events and `false` for comments. There are no commands: `/start` stays plain text.
+`AbstractController::webhook()` throws `LogicException` for Instagram: use `Webhook`.
 
-Branch on `$update->comment !== null` first. A comment also has `chatId` = the commenter
-and `isPrivateChat = true`, but it is **not** a DM: `sendMessage($chatId, …)` is not
+Branch on `$update->comment !== null` first. A comment also has `chatId` = the commenter,
+but it is **not** a DM: `sendMessage($chatId, …)` is not
 allowed, the only DM path is `sendPrivateReply($update->comment->id, …)` (or a public
 `replyToComment()`).
 
@@ -437,7 +440,10 @@ expired token cannot be refreshed and needs a new login. Meta takes the paramete
 token endpoints, including the app secret and the token, only in the query string; the
 library never logs URLs and scrubs client errors. With a proxy, all calls go to `baseUrl`:
 the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
-`api.instagram.com`), everything else to its usual `graph.instagram.com` path.
+`api.instagram.com`), everything else to its usual `graph.instagram.com` path. The proxy
+then sees the app secret and tokens in the query of `/oauth/access_token`,
+`/access_token` and `/refresh_access_token`: it must not log request URLs (keep Workers
+Logs and Logpush off for it).
 
 ### Sending
 

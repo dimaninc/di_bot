@@ -656,7 +656,11 @@ final class InstagramApiTest extends TestCase
         // Ни отписки аккаунта, ни записи позиции.
         self::assertSame([], $http->requests);
         self::assertSame([], $store->saves);
-        self::assertSame(['ok' => true], $controller->webhook('{"object":"instagram"}', ''));
+        try {
+            $controller->webhook('{"object":"instagram"}', '');
+            self::fail();
+        } catch (\LogicException) {
+        }
         self::assertSame([], $controller->handled);
     }
 

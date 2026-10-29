@@ -17,12 +17,12 @@ abstract class AbstractController
     /** $secret – значение X-Telegram-Bot-Api-Secret-Token или X-Max-Bot-Api-Secret. */
     public function webhook(string $rawBody, string $secret): array
     {
+        // Вебхук Instagram – уровня приложения, с подписью тела: Instagram\Webhook. Ошибка
+        // интеграции, а не входящих данных: 200 здесь молча терял бы события.
+        if ($this->api->platform() === Platform::Instagram) {
+            throw new \LogicException('Instagram webhooks are handled by Instagram\\Webhook');
+        }
         try {
-            // Вебхук Instagram – уровня приложения, с подписью тела: Instagram\Webhook.
-            if ($this->api->platform() === Platform::Instagram) {
-                $this->api->log('Instagram webhooks are handled by Instagram\\Webhook');
-                return ['ok' => true];
-            }
             $config = $this->api->config;
             if (
                 $config->token === '' ||

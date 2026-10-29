@@ -127,6 +127,8 @@ final class Update extends AbstractUpdate
             );
         }
         $u->comment = $comment;
+        // Комментарий публичный: общий код по isPrivateChat не примет его за личку.
+        $u->isPrivateChat = false;
         $u->updateId = 'comment:' . $comment->id;
         $u->userId = $comment->fromId;
         $u->text = $comment->text;
