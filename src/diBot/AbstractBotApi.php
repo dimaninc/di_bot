@@ -68,6 +68,7 @@ abstract class AbstractBotApi
      * $url – снять вебхук только с этим адресом (сверка со списком у площадки; нет такого –
      * ничего не делать), null – снять любой. Сверка и снятие – два запроса, не атомарно:
      * вебхук, поставленный другим сервисом между ними, тоже может сняться.
+     * Instagram: $url игнорируется, аккаунт отписывается целиком (подписка одна на аккаунт).
      */
     abstract public function deleteWebhook(?string $url = null): void;
     abstract public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch;

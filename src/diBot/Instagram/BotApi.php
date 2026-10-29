@@ -20,6 +20,8 @@ class BotApi extends AbstractBotApi
     // Подписей к медиа нет: непустой текст Policy отклоняет как caption_too_long.
     public const CAPTION_MAX_UNITS = 0;
     public const TEMPLATE_TEXT_MAX_UNITS = 640;
+    // Лимит комментария Instagram – 2200 символов; считаем в единицах UTF-16, как Text.
+    public const COMMENT_MAX_CHARS = 2200;
     public const TEMPLATE_BUTTONS_MAX = 3;
     // Длиннее 20 символов Meta обрезает сама; режем заранее, по границе UTF-16.
     public const BUTTON_TEXT_MAX_UNITS = 20;
@@ -60,7 +62,11 @@ class BotApi extends AbstractBotApi
         return $result;
     }
 
-    public function sendMessage(string $chatId, string $text, ?Keyboard $keyboard = null): array
+    public function sendMessage(
+        string $chatId,
+        #[\SensitiveParameter] string $text,
+        ?Keyboard $keyboard = null
+    ): array
     {
         return $this->send(['id' => self::id($chatId)], $text, $keyboard);
     }
@@ -68,16 +74,22 @@ class BotApi extends AbstractBotApi
     /** Единственное сообщение в личку автору комментария: не позже 7 дней, к эфиру – пока идёт. */
     public function sendPrivateReply(
         string $commentId,
-        string $text,
+        #[\SensitiveParameter] string $text,
         ?Keyboard $keyboard = null
     ): array {
         return $this->send(['comment_id' => self::id($commentId)], $text, $keyboard);
     }
 
     /** Публичный ответ под комментарием: ['id' => id нового комментария]. */
-    public function replyToComment(string $commentId, string $text): array
+    public function replyToComment(string $commentId, #[\SensitiveParameter] string $text): array
     {
-        $this->assertText($text);
+        self::assertNotEmpty($text);
+        if (
+            !mb_check_encoding($text, 'UTF-8') ||
+            \diBot\Text::length($text) > self::COMMENT_MAX_CHARS
+        ) {
+            throw new \InvalidArgumentException('Text does not fit comment limit');
+        }
         $data = $this->request('POST', '/' . self::id($commentId) . '/replies', body: [
             'message' => $text,
         ]);
@@ -211,7 +223,10 @@ class BotApi extends AbstractBotApi
         ]);
     }
 
-    /** Отписывает аккаунт от вебхуков приложения; $url не используется. */
+    /**
+     * Отписывает аккаунт от вебхуков приложения при любом $url: подписка одна на аккаунт.
+     * Не вызывать из polling- и dev-окружений на том же приложении Meta.
+     */
     public function deleteWebhook(?string $url = null): void
     {
         $this->request('DELETE', '/me/subscribed_apps');
@@ -240,8 +255,12 @@ class BotApi extends AbstractBotApi
         }
     }
 
-    private function send(array $recipient, string $text, ?Keyboard $keyboard): array
-    {
+    private function send(
+        array $recipient,
+        #[\SensitiveParameter] string $text,
+        ?Keyboard $keyboard
+    ): array {
+        self::assertNotEmpty($text);
         $this->assertText($text);
         $rendered = $keyboard?->render($this->platform()) ?? [];
         if (isset($rendered['buttons'])) {
@@ -264,7 +283,15 @@ class BotApi extends AbstractBotApi
         return $this->messages($recipient, $message);
     }
 
-    private function messages(array $recipient, array $message): array
+    // Пустое сообщение Meta отклонит, а Sender иначе отправил бы его вместо медиа.
+    private static function assertNotEmpty(string $text): void
+    {
+        if ($text === '') {
+            throw new \InvalidArgumentException('Instagram text must not be empty');
+        }
+    }
+
+    private function messages(array $recipient, #[\SensitiveParameter] array $message): array
     {
         return $this->request('POST', '/me/messages', body: [
             'recipient' => $recipient,
@@ -334,7 +361,7 @@ class BotApi extends AbstractBotApi
         string $method,
         string $path,
         array $query = [],
-        ?array $body = null
+        #[\SensitiveParameter] ?array $body = null
     ): array {
         // Токен идёт заголовком: перевод строки или пробел в нём – подмена заголовков.
         if (!preg_match('/^[A-Za-z0-9._|-]+$/D', $this->config->token)) {

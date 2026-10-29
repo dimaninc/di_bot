@@ -17,6 +17,8 @@ final class Errors
     private const NOT_RATE_LIMIT_SUBCODES = [2018338, 1893016];
     // Лимиты Meta считаются окнами в часы: секунда без подсказки площадки бессмысленна.
     public const MIN_RATE_LIMIT_DELAY = 60;
+    // Подсказка дольше суток – скорее мусор в заголовке, чем реальный лимит.
+    private const MAX_HEADER_DELAY = 24 * 60 * 60;
 
     public static function rateLimitDelay(array $response, int $httpStatus = 0): int
     {
@@ -87,7 +89,10 @@ final class Errors
             }
         }
         if (isset($headers['retry-after'])) {
-            $seconds = max($seconds, ApiException::retrySeconds($headers['retry-after']));
+            $seconds = max(
+                $seconds,
+                min(ApiException::retrySeconds($headers['retry-after']), self::MAX_HEADER_DELAY)
+            );
         }
         return $seconds;
     }

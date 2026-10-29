@@ -9,7 +9,8 @@ use diBot\Exception\SignatureException;
  */
 final class Webhook
 {
-    public const MAX_BODY_BYTES = 1024 * 1024;
+    // Meta пакует несколько событий в одно тело.
+    public const MAX_BODY_BYTES = 5 * 1024 * 1024;
 
     public function __construct(
         #[\SensitiveParameter] private readonly string $appSecret,
@@ -51,7 +52,10 @@ final class Webhook
      *
      * @return list<array>
      */
-    public function events(string $rawBody, string $signatureHeader): array
+    public function events(
+        #[\SensitiveParameter] string $rawBody,
+        #[\SensitiveParameter] string $signatureHeader
+    ): array
     {
         if (strlen($rawBody) > self::MAX_BODY_BYTES) {
             throw new \LengthException('Update too large');

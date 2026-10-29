@@ -275,6 +275,10 @@ final class InstagramUpdateTest extends TestCase
     public function testBodyLimitAndForeignObjects(): void
     {
         $webhook = new Webhook('app-secret', 'verify');
+        self::assertSame(5 * 1024 * 1024, Webhook::MAX_BODY_BYTES);
+        // Пакет Meta в 2 МБ (больше прежнего лимита) проходит.
+        $batch = self::body(self::messaging(['message' => ['mid' => 'm', 'text' => str_repeat('x', 2 * 1024 * 1024)]]));
+        self::assertCount(1, $webhook->events($batch, self::sign($batch)));
         $large = str_repeat(' ', Webhook::MAX_BODY_BYTES + 1);
         try {
             $webhook->events($large, self::sign($large));

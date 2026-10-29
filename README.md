@@ -361,13 +361,18 @@ try {
     foreach ($webhook->events($rawBody, $signature) as $event) {
         $store->save($event['entry_id'], json_encode($event));
     }
-} catch (SignatureException) {
-    // not from Meta: store nothing
+    http_response_code(200);
+} catch (SignatureException | \LengthException) {
+    // not from Meta or too large: store nothing, still answer 200
+    http_response_code(200);
 }
+// Only a failure to store (e.g. the DB is down) may answer 5xx, so that Meta redelivers.
 ```
 
-`events()` rejects bodies over 1 MiB (`LengthException`) and a missing or wrong
-signature (`SignatureException`); invalid JSON or a non-`instagram` object gives `[]`.
+`events()` rejects bodies over 5 MiB (`LengthException`; Meta batches several updates
+into one body) and a missing or wrong signature (`SignatureException`); invalid JSON or a
+non-`instagram` object gives `[]`. Answer **200** in all these cases, never 5xx: Meta
+retries the same body for up to 36 hours and it will fail the same way every time.
 Each event is self-contained: `object`, `entry_id` (the business account that received
 it), `time`, and either `messaging` (one item of `entry[].messaging`) or `change` (one
 item of `entry[].changes`). The worker selects the bot by `entry_id`, then calls
@@ -377,6 +382,11 @@ deliveries for up to 36 hours: deduplicate by `updateId`.
 `Instagram\Update` adds `accountId` (= `entry_id`) and `comment` (`Instagram\Comment` for
 comment events). `chatId` and `userId` are the user's IGSID; `isPrivateChat` is `true`.
 There are no commands: `/start` stays plain text.
+
+Branch on `$update->comment !== null` first. A comment also has `chatId` = the commenter
+and `isPrivateChat = true`, but it is **not** a DM: `sendMessage($chatId, …)` is not
+allowed, the only DM path is `sendPrivateReply($update->comment->id, …)` (or a public
+`replyToComment()`).
 
 | Event | Fields | `updateId` |
 |---|---|---|
@@ -389,6 +399,8 @@ There are no commands: `/start` stays plain text.
 Audio and video are reported in `otherContent`; shared posts, reels, stories and other
 types as `other`. Echoes, read receipts, reactions, edits, deletions, referrals and events
 from the business account itself (including its own replies under a post) give `null`.
+Own comments are recognized by `from.id == entry.id`, which is not yet confirmed live:
+also skip comments whose `comment->fromUsername` equals `getMe()['username']`.
 Webhook comments carry no timestamp: `comment->timestamp` is the event `time`.
 Attachment URLs are signed CDN links: download them promptly with
 `downloadAttachment('', $url)` (public download guard, no credentials).
@@ -400,6 +412,9 @@ Attachment URLs are signed CDN links: download them promptly with
 route events. `setWebhook($url)` ignores `$url` and subscribes the account to
 `UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
 POST `/me/subscribed_apps`; `deleteWebhook()` sends DELETE `/me/subscribed_apps`.
+Unlike other platforms, `deleteWebhook($url)` ignores `$url` and unsubscribes the whole
+account (the subscription is per account): never call it from polling or dev setups that
+share the Meta app, or production stops receiving events.
 
 `Instagram\Auth` implements Business Login. The application keeps the state, stores tokens
 encrypted and schedules refreshes:
@@ -427,6 +442,8 @@ the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
 ### Sending
 
 - Text is at most 1000 **bytes** of UTF-8 (`TEXT_MAX_BYTES`, about 500 Cyrillic letters).
+  Empty text is rejected with `InvalidArgumentException` before any request
+  (`sendMessage`, `sendPrivateReply`, `replyToComment`, button templates).
 - Keyboards have no rows. Up to 3 buttons become a button template (callback → `postback`,
   link → `web_url`; text up to 640 characters). 4–13 callback buttons become quick
   replies. More than 3 buttons with a link, or more than 13 buttons, raise
@@ -435,7 +452,8 @@ the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
   replies are not shown on desktop: also parse typed answers.
 - `sendPrivateReply($commentId, $text, $keyboard)` sends the one private reply allowed per
   comment (within 7 days; for live comments only during the broadcast).
-  `replyToComment($commentId, $text)` posts a public reply and returns `['id' => …]`.
+  `replyToComment($commentId, $text)` posts a public reply and returns `['id' => …]`;
+  its limit is the comment limit, 2200 characters (`COMMENT_MAX_CHARS`, UTF-16 units).
 - `getMedia($after, $limit ≤ 100)` and `getComments($mediaId, $after, $limit ≤ 50)` return
   `Instagram\Page` (`items`, `next` cursor or `null`) of `MediaItem` (`id`, `caption`,
   `mediaType`, `permalink`, `mediaUrl`, `thumbnailUrl`, `timestamp`) and `Comment` (`id`,
@@ -448,10 +466,13 @@ the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
   button, then retry.
 - Media goes only by public URL; Meta downloads it. `Policy` chooses `Url` for PNG/JPEG
   photos up to 8 MiB and PDF documents up to 25 MiB with `publicUrl`; otherwise it refuses
-  with `too_large`, `unsupported_type` or `no_public_url`. Instagram has no captions, so
-  `Sender` with nonempty text gets `caption_too_long` and sends only the text with its
-  keyboard. To send a file, call `Sender::send($chatId, '', $factory)` or `sendMedia()`
-  without caption and keyboard, then send the text separately.
+  with `too_large`, `unsupported_type` or `no_public_url`. Media on Instagram cannot carry
+  a caption or a keyboard. `Sender` with nonempty text gets `caption_too_long` and sends
+  only the text with its keyboard. To send a file, call `Sender::send($chatId, '', $factory)`
+  (empty text, no keyboard) or `sendMedia()` without caption and keyboard, then send the
+  text and buttons with a separate `sendMessage()`. If the media is refused (or a keyboard
+  is passed) with empty text, the text fallback now fails with `InvalidArgumentException`
+  instead of sending an empty message.
 - `sendFileId()` (reusable attachment IDs need the Facebook Page API), `editMessage()`,
   `setCommands()` and `getUpdates()` throw `ApiException(reason: 'unsupported')`.
   `answerCallback()` is a local no-op.
@@ -463,7 +484,7 @@ Meta's error text never reaches exceptions or logs. Classification by `error.cod
 
 | Meta | `reason` / flag |
 |---|---|
-| 4, 17, 32, 613, 80002, 80006; HTTP 429 | `rate_limit`; delay from `X-Business-Use-Case-Usage` (minutes) or `Retry-After`, at least 60 s |
+| 4, 17, 32, 613, 80002, 80006; HTTP 429 | `rate_limit`; delay from `X-Business-Use-Case-Usage` (minutes) or `Retry-After`, at least 60 s, header hints capped at 24 h |
 | 10 / 2018278, 10 / 2534022 | `window_closed` – outside the 24-hour window |
 | 100 / 2534025 | `reply_unavailable` – the comment is not eligible for a private reply |
 | message "User consent is required…" (no documented code) | `consent_required` |

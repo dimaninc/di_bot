@@ -427,6 +427,7 @@ final class InstagramApiTest extends TestCase
         [$api] = $this->api([new Response(500, json_encode(['error' => ['code' => 2]]))]);
         try {
             $api->sendMessage('5', 'x');
+            self::fail();
         } catch (ApiException $e) {
             self::assertTrue($e->isDeliveryUncertain());
         }
@@ -457,10 +458,25 @@ final class InstagramApiTest extends TestCase
         self::assertStringNotContainsString(self::TOKEN, $logs);
         self::assertStringNotContainsString('секретный', $logs);
         self::assertStringNotContainsString('bad', $logs);
-        // Перевод строки в токене не должен дойти до заголовка.
+        // Перевод строки или пробел в токене отсекает Config, прочие чужие символы – BotApi.
+        foreach (["a\r\nX-Evil: 1", 'a b'] as $token) {
+            try {
+                new Config($token);
+                self::fail();
+            } catch (\InvalidArgumentException) {
+            }
+        }
         $api = new BotApi(new Config('a|b.c'), $http = new FakeClient([self::sent()]));
         $api->sendMessage('5', 'x');
         self::assertCount(1, $http->requests);
+        $api = new BotApi(new Config('a:b'), $http = new FakeClient([self::sent()]));
+        try {
+            $api->sendMessage('5', 'x');
+            self::fail();
+        } catch (ApiException $e) {
+            self::assertSame('invalid_token', $e->reason);
+        }
+        self::assertSame([], $http->requests);
     }
 
     public function testMediaGoesByUrlOnlyAndWithoutCaption(): void
@@ -521,6 +537,69 @@ final class InstagramApiTest extends TestCase
         self::assertSame(['text' => 'Итог'], self::body($http)['message']);
         (new Sender($api))->send('5', '', $photo);
         self::assertSame('image', self::body($http, 1)['message']['attachments'][0]['type']);
+    }
+
+    public function testEmptyTextIsRejectedBeforeNetwork(): void
+    {
+        [$api, $http] = $this->api([]);
+        $keyboard = new Keyboard([[Button::callback('Да', 'yes')]]);
+        foreach (
+            [
+                fn() => $api->sendMessage('5', ''),
+                fn() => $api->sendMessage('5', '', $keyboard),
+                fn() => $api->sendPrivateReply('17900000000000001', ''),
+                fn() => $api->sendPrivateReply('17900000000000001', '', $keyboard),
+                fn() => $api->replyToComment('17900000000000001', ''),
+            ]
+            as $i => $call
+        ) {
+            try {
+                $call();
+                self::fail((string) $i);
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        self::assertSame([], $http->requests);
+    }
+
+    public function testSenderMediaWithKeyboardSendsNoEmptyTemplate(): void
+    {
+        [$api, $http] = $this->api([self::sent()]);
+        $photo = fn() => new Media('photo', 'image/jpeg', 1, 'https://files.example/a.jpg');
+        $keyboard = new Keyboard([[Button::callback('Да', 'yes')]]);
+        try {
+            (new Sender($api))->send('5', '', $photo, $keyboard);
+            self::fail();
+        } catch (\InvalidArgumentException) {
+        }
+        self::assertSame([], $http->requests);
+    }
+
+    public function testCommentReplyLimitIs2200Characters(): void
+    {
+        [$api, $http] = $this->api([FakeClient::json(['id' => '1'])]);
+        // 600 кириллических букв – 1200 байт: больше лимита лички, но в пределах комментария.
+        $api->replyToComment('17900000000000001', str_repeat('ж', 600));
+        self::assertCount(1, $http->requests);
+        try {
+            $api->replyToComment('17900000000000001', str_repeat('a', 2201));
+            self::fail();
+        } catch (\InvalidArgumentException) {
+        }
+        self::assertCount(1, $http->requests);
+    }
+
+    public function testRetryAfterIsCappedAtOneDay(): void
+    {
+        [$api] = $this->api([
+            new Response(429, 'not json', ['retry-after' => (string) (7 * 24 * 3600)]),
+        ]);
+        try {
+            $api->sendMessage('5', 'x');
+            self::fail();
+        } catch (ApiException $e) {
+            self::assertSame(24 * 3600, $e->rateLimitDelay());
+        }
     }
 
     public function testDownloadUsesPublicCdnUrl(): void
