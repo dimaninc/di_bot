@@ -27,6 +27,33 @@ class ApiException extends \RuntimeException
         return $seconds === false ? 1 : $seconds;
     }
 
+    /**
+     * Ошибка подменяемого HTTP-клиента без чужого текста: сохраняются только известные
+     * безопасные классификации, остальное – network_error без исходного исключения (URL
+     * cURL может содержать токен).
+     */
+    public static function fromTransport(\Throwable $e): self
+    {
+        if (!($e instanceof self)) {
+            return new self(0, 'network_error');
+        }
+        $reason = in_array(
+            $e->reason,
+            [
+                'curl_init',
+                'network_error',
+                'response_too_large',
+                'tls_untrusted_ca',
+                'tls_ca_file',
+                'tls_client_certificate',
+            ],
+            true
+        )
+            ? $e->reason
+            : 'network_error';
+        return new self($e->httpStatus, $reason);
+    }
+
     public function isDeliveryUncertain(): bool
     {
         // Без подтверждённого ответа даже запасной текст может стать дублем.

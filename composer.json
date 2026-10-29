@@ -1,6 +1,6 @@
 {
     "name": "dimaninc/di_bot",
-    "description": "Telegram and MAX bot transport without framework or database dependencies",
+    "description": "Telegram, MAX and Instagram bot transport without framework or database dependencies",
     "type": "library",
     "license": "MIT",
     "require": {

@@ -18,6 +18,11 @@ abstract class AbstractController
     public function webhook(string $rawBody, string $secret): array
     {
         try {
+            // Вебхук Instagram – уровня приложения, с подписью тела: Instagram\Webhook.
+            if ($this->api->platform() === Platform::Instagram) {
+                $this->api->log('Instagram webhooks are handled by Instagram\\Webhook');
+                return ['ok' => true];
+            }
             $config = $this->api->config;
             if (
                 $config->token === '' ||
@@ -59,6 +64,10 @@ abstract class AbstractController
     ): void {
         if (PHP_SAPI !== 'cli') {
             throw new \LogicException('Polling is only available in CLI');
+        }
+        // Проверка до deleteWebhook(): у Instagram он отписал бы аккаунт от событий.
+        if ($this->api->platform() === Platform::Instagram) {
+            throw new ApiException(0, 'unsupported');
         }
         if ($maxBatches < 0) {
             throw new \InvalidArgumentException('Invalid batch limit');
