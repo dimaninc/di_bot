@@ -224,13 +224,13 @@ Instagram API with Instagram Login (`graph.instagram.com`), версия Graph A
   панели Meta. `Webhook` подтверждает адрес (`hub.challenge`), проверяет
   `X-Hub-Signature-256` и режет тело на самостоятельные события с `entry_id`; приложение
   хранит событие строкой и выбирает бота по `entry_id`. `AbstractController` для
-  Instagram не используется: `webhook()` ничего не обрабатывает, `poll()` отказывает до
+  Instagram не используется: `webhook()` бросает `LogicException`, `poll()` отказывает до
   `deleteWebhook()` – иначе аккаунт отписался бы от событий.
 - **`setWebhook()` подписывает аккаунт** (`POST /me/subscribed_apps`) на поля
   `UPDATE_TYPES`, адрес не передаётся. `deleteWebhook($url)` отступает от общего контракта:
   `$url` игнорируется, аккаунт отписывается целиком (подписка одна на аккаунт). Поэтому его
-  нельзя вызывать из polling- и dev-окружений, разделяющих приложение Meta с боевым. Идентификатор для маршрутизации – `user_id` из
-  `/me` (`getMe()['account_id']`), а не `id`.
+  нельзя вызывать из polling- и dev-окружений, разделяющих приложение Meta с боевым.
+  Идентификатор для маршрутизации – `user_id` из `/me` (`getMe()['account_id']`), а не `id`.
 - **Текст** – до 1000 байт UTF-8, а не единиц UTF-16; пустой текст – `InvalidArgumentException`
   до запроса. Ответ под комментарием (`replyToComment`) – до 2200 символов
   (`COMMENT_MAX_CHARS`, единицы UTF-16, как в `Text`). Рядов кнопок нет: до 3 кнопок –

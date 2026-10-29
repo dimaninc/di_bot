@@ -345,7 +345,7 @@ the URL. A custom `baseUrl` (a Worker proxy) requires `proxySecret`, sent as
 ### Webhook, events and routing
 
 The webhook URL is one per Meta app and is set in the Meta dashboard, not per bot.
-`Instagram\Webhook` replaces `AbstractController`: its `webhook()` ignores Instagram, and
+`Instagram\Webhook` replaces `AbstractController`: its `webhook()` throws `LogicException`, and
 `poll()` throws `unsupported` before touching the store or the subscription.
 
 ```php
