@@ -391,7 +391,7 @@ allowed, the only DM path is `sendPrivateReply($update->comment->id, …)` (or a
 | Event | Fields | `updateId` |
 |---|---|---|
 | DM text | `text`, `messageId` | `message:<mid>` |
-| quick reply | `text` (button title) and `payload`; not a callback | `message:<mid>` |
+| quick reply | `text` (button title), `payload`, `callbackId` = mid – a callback like a postback | `message:<mid>` |
 | postback (template button) | `payload`, `callbackId` = postback mid | `postback:<mid>` |
 | image / PDF | `attachments` with the CDN `url`, empty `ref` | `message:<mid>` |
 | `comments` / `live_comments` | `text`, `comment`, `userProfile['username']` | `comment:<id>` |

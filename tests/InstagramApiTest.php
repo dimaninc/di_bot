@@ -602,6 +602,29 @@ final class InstagramApiTest extends TestCase
         }
     }
 
+    public function testBusinessUsageDelayIsCappedAtOneDay(): void
+    {
+        [$api] = $this->api([
+            new Response(400, json_encode(['error' => ['code' => 80002]]), [
+                'x-business-use-case-usage' => json_encode([
+                    '1784' => [['type' => 'instagram', 'estimated_time_to_regain_access' => 1500]],
+                ]),
+            ]),
+        ]);
+        try {
+            $api->sendMessage('5', 'x');
+            self::fail();
+        } catch (ApiException $e) {
+            self::assertSame(24 * 3600, $e->rateLimitDelay());
+        }
+    }
+
+    public function testProxyUrlWithQueryIsReportedAsSuch(): void
+    {
+        $this->expectExceptionMessage('must not contain a query');
+        new \diBot\Instagram\Auth('1', 'secret', 'https://lk.example/cb', null, 'https://proxy.example/?a=1', 'proxy');
+    }
+
     public function testDownloadUsesPublicCdnUrl(): void
     {
         [$api, $http] = $this->api([new Response(200, 'img', ['content-type' => 'image/jpeg'])]);

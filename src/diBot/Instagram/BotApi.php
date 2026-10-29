@@ -27,9 +27,7 @@ class BotApi extends AbstractBotApi
     public const BUTTON_TEXT_MAX_UNITS = 20;
     // Лимит payload для Instagram не опубликован; 1000 – как у Messenger.
     public const CALLBACK_MAX_BYTES = 1000;
-    public const BUTTONS_PER_ROW = 13;
     public const BUTTONS_MAX = 13;
-    public const ROWS_MAX = 13;
     // Файл скачивает сама Meta по URL: лимит Worker не действует, действуют лимиты Send API.
     public const FILE_MAX_BYTES = 25 * 1024 * 1024;
     public const PHOTO_MAX_BYTES = 8 * 1024 * 1024;

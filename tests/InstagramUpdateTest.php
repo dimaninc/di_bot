@@ -77,7 +77,8 @@ final class InstagramUpdateTest extends TestCase
         );
         self::assertSame('answer:1', $u->payload);
         self::assertSame('Да', $u->text);
-        self::assertFalse($u->isCallback());
+        self::assertTrue($u->isCallback());
+        self::assertSame('m2', $u->callbackId);
     }
 
     public function testPostbackIsCallback(): void

@@ -35,7 +35,10 @@ final class Auth
         Config::assertHttpsUrl($redirectUri);
         if ($baseUrl !== '') {
             Config::assertHttpsUrl($baseUrl);
-            if (parse_url($baseUrl, PHP_URL_QUERY) !== null || $proxySecret === '') {
+            if (parse_url($baseUrl, PHP_URL_QUERY) !== null) {
+                throw new \InvalidArgumentException('Instagram proxy URL must not contain a query');
+            }
+            if ($proxySecret === '') {
                 throw new \InvalidArgumentException('Instagram proxy requires a secret');
             }
         }

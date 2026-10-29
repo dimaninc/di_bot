@@ -247,7 +247,8 @@ Instagram API with Instagram Login (`graph.instagram.com`), версия Graph A
 - **Ошибки** – по `code`/`error_subcode`, текст Meta наружу не выходит. Новые причины:
   `window_closed` (вне окна 24 часа), `reply_unavailable` (комментарий не годится для
   private reply), `consent_required` (профиль без согласия собеседника),
-  `invalid_token`, `unsupported`. Задержка throttling – не меньше 60 секунд: лимиты Meta
+  `unsupported`; существующая `invalid_token` у Instagram означает и код 190 (Meta отозвала
+  или просрочила токен). Задержка throttling – не меньше 60 секунд: лимиты Meta
   считаются окнами в часы.
 
 ## 7. Версионирование

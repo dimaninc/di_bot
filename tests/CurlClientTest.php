@@ -130,6 +130,7 @@ namespace diBot\Tests {
                 "HTTP/2 200\r\n",
                 "Content-Type: image/png\r\n",
                 "Retry-After: 12\r\n",
+                "X-Business-Use-Case-Usage: {\"1\":[]}\r\n",
                 "Set-Cookie: SECRET\r\n",
             ];
             CurlProbe::$chunks = ['123', '45'];
@@ -142,7 +143,14 @@ namespace diBot\Tests {
                 )
             );
             self::assertSame('12345', $r->body);
-            self::assertSame(['content-type' => 'image/png', 'retry-after' => '12'], $r->headers);
+            self::assertSame(
+                [
+                    'content-type' => 'image/png',
+                    'retry-after' => '12',
+                    'x-business-use-case-usage' => '{"1":[]}',
+                ],
+                $r->headers
+            );
         }
         public function testDownloadRejectsPrivateAddressBeforeOpeningConnection(): void
         {

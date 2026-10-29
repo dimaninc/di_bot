@@ -55,7 +55,7 @@ final class CurlClient implements Client
                 count($pair) === 2 &&
                 in_array(
                     strtolower(trim($pair[0])),
-                    ['content-type', 'location', 'retry-after'],
+                    ['content-type', 'location', 'retry-after', 'x-business-use-case-usage'],
                     true
                 )
             ) {

@@ -73,6 +73,10 @@ final class Update extends AbstractUpdate
         $u->text = self::string($message['text'] ?? '');
         $quick = is_array($message['quick_reply'] ?? null) ? $message['quick_reply'] : [];
         $u->payload = self::string($quick['payload'] ?? '');
+        // Нажатие quick reply – тот же callback, что postback: иначе 4-я кнопка меняла бы тип апдейта.
+        if ($u->payload !== '') {
+            $u->callbackId = $u->messageId;
+        }
         $attachments = is_array($message['attachments'] ?? null) ? $message['attachments'] : [];
         foreach ($attachments as $item) {
             $type = is_array($item) ? $item['type'] ?? null : null;

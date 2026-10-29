@@ -83,8 +83,8 @@ final class Errors
         foreach (is_array($usage) ? $usage : [] as $entries) {
             foreach (is_array($entries) ? $entries : [] as $entry) {
                 $minutes = is_array($entry) ? $entry['estimated_time_to_regain_access'] ?? 0 : 0;
-                if (is_int($minutes) && $minutes > 0 && $minutes <= 24 * 60) {
-                    $seconds = max($seconds, $minutes * 60);
+                if (is_int($minutes) && $minutes > 0) {
+                    $seconds = max($seconds, min($minutes * 60, self::MAX_HEADER_DELAY));
                 }
             }
         }
