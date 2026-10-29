@@ -55,8 +55,7 @@ final class Webhook
     public function events(
         #[\SensitiveParameter] string $rawBody,
         #[\SensitiveParameter] string $signatureHeader
-    ): array
-    {
+    ): array {
         if (strlen($rawBody) > self::MAX_BODY_BYTES) {
             throw new \LengthException('Update too large');
         }

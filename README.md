@@ -395,7 +395,7 @@ allowed, the only DM path is `sendPrivateReply($update->comment->id, …)` (or a
 |---|---|---|
 | DM text | `text`, `messageId` | `message:<mid>` |
 | quick reply | `text` (button title), `payload`, `callbackId` = mid – a callback like a postback | `message:<mid>` |
-| postback (template button) | `payload`, `callbackId` = postback mid | `postback:<mid>` |
+| postback (template button) | `text` (button title), `payload`, `callbackId` = postback mid | `postback:<mid>` |
 | image / PDF | `attachments` with the CDN `url`, empty `ref` | `message:<mid>` |
 | `comments` / `live_comments` | `text`, `comment`, `userProfile['username']` | `comment:<id>` |
 
@@ -404,7 +404,8 @@ types as `other`. Echoes, read receipts, reactions, edits, deletions, referrals 
 from the business account itself (including its own replies under a post) give `null`.
 Own comments are recognized by `from.id == entry.id`, which is not yet confirmed live:
 also skip comments whose `comment->fromUsername` equals `getMe()['username']`.
-Webhook comments carry no timestamp: `comment->timestamp` is the event `time`.
+Webhook comments carry no timestamp: `comment->timestamp` is the event `time` as sent
+(seconds or milliseconds – not confirmed yet, see ACCEPTANCE).
 Attachment URLs are signed CDN links: download them promptly with
 `downloadAttachment('', $url)` (public download guard, no credentials).
 
@@ -473,12 +474,10 @@ Logs and Logpush off for it).
 - Media goes only by public URL; Meta downloads it. `Policy` chooses `Url` for PNG/JPEG
   photos up to 8 MiB and PDF documents up to 25 MiB with `publicUrl`; otherwise it refuses
   with `too_large`, `unsupported_type` or `no_public_url`. Media on Instagram cannot carry
-  a caption or a keyboard. `Sender` with nonempty text gets `caption_too_long` and sends
-  only the text with its keyboard. To send a file, call `Sender::send($chatId, '', $factory)`
-  (empty text, no keyboard) or `sendMedia()` without caption and keyboard, then send the
-  text and buttons with a separate `sendMessage()`. If the media is refused (or a keyboard
-  is passed) with empty text, the text fallback now fails with `InvalidArgumentException`
-  instead of sending an empty message.
+  a caption or a keyboard, so `Sender` sends the media without them and then the main text
+  with its keyboard as a second message; if the media is refused, it sends `fallbackText`
+  as on other platforms. A keyboard with empty text, or a refused media with empty text,
+  throws `InvalidArgumentException` before any request: Instagram rejects empty messages.
 - `sendFileId()` (reusable attachment IDs need the Facebook Page API), `editMessage()`,
   `setCommands()` and `getUpdates()` throw `ApiException(reason: 'unsupported')`.
   `answerCallback()` is a local no-op.

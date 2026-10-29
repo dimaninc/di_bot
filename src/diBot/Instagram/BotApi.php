@@ -64,8 +64,7 @@ class BotApi extends AbstractBotApi
         string $chatId,
         #[\SensitiveParameter] string $text,
         ?Keyboard $keyboard = null
-    ): array
-    {
+    ): array {
         return $this->send(['id' => self::id($chatId)], $text, $keyboard);
     }
 
@@ -216,9 +215,11 @@ class BotApi extends AbstractBotApi
      */
     public function setWebhook(string $url): array
     {
-        return $this->request('POST', '/me/subscribed_apps', [
-            'subscribed_fields' => implode(',', self::UPDATE_TYPES),
-        ]);
+        return self::succeeded(
+            $this->request('POST', '/me/subscribed_apps', [
+                'subscribed_fields' => implode(',', self::UPDATE_TYPES),
+            ])
+        );
     }
 
     /**
@@ -227,7 +228,16 @@ class BotApi extends AbstractBotApi
      */
     public function deleteWebhook(?string $url = null): void
     {
-        $this->request('DELETE', '/me/subscribed_apps');
+        self::succeeded($this->request('DELETE', '/me/subscribed_apps'));
+    }
+
+    /** 200 с {"success": false} – подписка не изменилась, а не успех. */
+    private static function succeeded(array $response): array
+    {
+        if (($response['success'] ?? null) !== true) {
+            throw new ApiException(200, 'api_error');
+        }
+        return $response;
     }
 
     public function rateLimitDelay(array $response, int $httpStatus = 0): int

@@ -54,6 +54,8 @@ final class Update extends AbstractUpdate
             // У postback свой mid – стабильный идентификатор нажатия для дедупликации.
             $u->callbackId = self::string($postback['mid'] ?? '');
             $u->payload = self::string($postback['payload'] ?? '');
+            // Подпись кнопки, как text у quick reply: вид нажатия не зависит от числа кнопок.
+            $u->text = self::string($postback['title'] ?? '');
             $u->updateId = 'postback:' . $u->callbackId;
             return $u->callbackId !== '' ? $u : null;
         }

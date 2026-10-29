@@ -92,7 +92,8 @@ final class InstagramUpdateTest extends TestCase
         self::assertSame('pb-1', $u->callbackId);
         self::assertSame('done', $u->payload);
         self::assertSame('postback:pb-1', $u->updateId);
-        self::assertSame('', $u->text);
+        // Как у quick reply: text – подпись нажатой кнопки.
+        self::assertSame('Готово', $u->text);
         self::assertNull(Update::fromArray(self::event(['postback' => ['payload' => 'x']])));
     }
 

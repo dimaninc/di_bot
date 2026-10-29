@@ -12,7 +12,8 @@ readonly final class Comment
         public string $text = '',
         public string $fromId = '',
         public string $fromUsername = '',
-        // Как прислала площадка: ISO 8601 у API, Unix-время у вебхука (тогда из entry.time).
+        // Как прислала площадка: ISO 8601 у API, у вебхука – entry.time как есть (секунды или
+        // миллисекунды – не подтверждено, ACCEPTANCE).
         public string $timestamp = '',
         // Комментарий к прямому эфиру: private reply возможен только пока эфир идёт.
         public bool $live = false

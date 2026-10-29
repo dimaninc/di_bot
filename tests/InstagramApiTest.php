@@ -347,6 +347,22 @@ final class InstagramApiTest extends TestCase
         );
     }
 
+    public function testSubscriptionWithoutSuccessIsAnError(): void
+    {
+        [$api] = $this->api([
+            FakeClient::json(['success' => false]),
+            FakeClient::json([]),
+        ]);
+        foreach ([fn() => $api->setWebhook(''), fn() => $api->deleteWebhook()] as $call) {
+            try {
+                $call();
+                self::fail();
+            } catch (ApiException $e) {
+                self::assertSame('api_error', $e->reason);
+            }
+        }
+    }
+
     public function testUnsupportedMethodsAndLocalCallbackAnswer(): void
     {
         [$api, $http] = $this->api([]);
@@ -528,15 +544,28 @@ final class InstagramApiTest extends TestCase
         self::assertCount(2, $http->requests);
     }
 
-    public function testSenderSendsTextInsteadOfCaptionedMedia(): void
+    public function testSenderSendsMediaThenTextWithKeyboard(): void
     {
-        [$api, $http] = $this->api([self::sent(), self::sent()]);
+        [$api, $http] = $this->api([self::sent(), self::sent(), self::sent()]);
         $photo = fn() => new Media('photo', 'image/jpeg', 1, 'https://files.example/a.jpg');
-        (new Sender($api))->send('5', 'Итог', $photo, fallbackText: 'короткий');
-        // caption_too_long: уходит исходный текст, без медиа.
-        self::assertSame(['text' => 'Итог'], self::body($http)['message']);
+        $keyboard = new Keyboard([[Button::callback('Да', 'yes')]]);
+        (new Sender($api))->send('5', 'Итог', $photo, $keyboard, 'Итог: https://files.example/a.jpg');
+        // Подписей нет: файл без кнопок, затем основной (не запасной) текст с кнопками.
+        self::assertSame('image', self::body($http)['message']['attachments'][0]['type']);
+        self::assertSame('Итог', self::body($http, 1)['message']['attachment']['payload']['text']);
         (new Sender($api))->send('5', '', $photo);
-        self::assertSame('image', self::body($http, 1)['message']['attachments'][0]['type']);
+        self::assertSame('image', self::body($http, 2)['message']['attachments'][0]['type']);
+        self::assertCount(3, $http->requests);
+    }
+
+    public function testSenderUsesFallbackTextWhenMediaIsRefused(): void
+    {
+        [$api, $http] = $this->api([self::sent()]);
+        // Нет publicUrl – файл не отправить, уходит запасной текст со ссылкой.
+        $pdf = fn() => new Media('document', 'application/pdf', 1, '', '/tmp/r.pdf');
+        (new Sender($api))->send('5', 'Ваш отчёт', $pdf, null, 'Ваш отчёт: https://example.com/r.pdf');
+        self::assertSame(['text' => 'Ваш отчёт: https://example.com/r.pdf'], self::body($http)['message']);
+        self::assertCount(1, $http->requests);
     }
 
     public function testEmptyTextIsRejectedBeforeNetwork(): void
