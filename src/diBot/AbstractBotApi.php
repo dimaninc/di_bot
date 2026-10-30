@@ -123,6 +123,13 @@ abstract class AbstractBotApi
         return $result;
     }
 
+    /** Проверка sendMessage() без сети: InvalidArgumentException, если сообщение негодно. */
+    public function assertMessage(string $text, ?Keyboard $keyboard = null): void
+    {
+        $this->assertText($text);
+        $keyboard?->render($this->platform());
+    }
+
     protected function assertText(string $text, bool $caption = false): void
     {
         if (

@@ -476,7 +476,10 @@ Logs and Logpush off for it).
   with `too_large`, `unsupported_type` or `no_public_url`. Media on Instagram cannot carry
   a caption or a keyboard, so `Sender` sends the media without them and then the main text
   with its keyboard as a second message; if the media is refused, it sends `fallbackText`
-  as on other platforms. A keyboard with empty text, or a refused media with empty text,
+  as on other platforms. The text and keyboard are validated before the media goes out;
+  the return value is the text message response. If the text fails after the media was
+  delivered, `Sender` throws `PartialDeliveryException` (an `ApiException` with the text's
+  reason and delay, plus `mediaResponse`): retry only the text, not the whole `send()`. A keyboard with empty text, or a refused media with empty text,
   throws `InvalidArgumentException` before any request: Instagram rejects empty messages.
 - `sendFileId()` (reusable attachment IDs need the Facebook Page API), `editMessage()`,
   `setCommands()` and `getUpdates()` throw `ApiException(reason: 'unsupported')`.
@@ -495,7 +498,7 @@ Meta's error text never reaches exceptions or logs. Classification by `error.cod
 | message "User consent is required…" (no documented code) | `consent_required` |
 | 190 | `invalid_token` – refresh or reconnect |
 | 551, subcode 2018108 | `blocked` flag |
-| HTTP 5xx | `api_error`, delivery uncertain |
+| HTTP 5xx | `api_error` (`invalid_json` for a non-JSON body, e.g. a proxy HTML page), delivery uncertain |
 
 613 with subcodes 2018338 (flagged as abusive) and 1893016 is not throttling. A repeated
 private reply or one older than 7 days has no documented code and may surface as plain

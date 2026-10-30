@@ -240,7 +240,10 @@ Instagram API with Instagram Login (`graph.instagram.com`), версия Graph A
 - **Медиа только по URL**: файл скачивает сама Meta, через прокси идёт только JSON.
   `Policy` для Instagram выбирает URL или отказ; загрузки нет. Подписей нет
   (`CAPTION_MAX_UNITS = 0`) и кнопок у медиа нет: `Sender` отправляет медиа без подписи и
-  кнопок, затем основной текст с клавиатурой; при отказе файла – `fallbackText`. Клавиатура
+  кнопок, затем основной текст с клавиатурой; при отказе файла – `fallbackText`. Текст и
+  клавиатура проверяются до отправки медиа (`assertMessage()`), возвращается ответ на текст;
+  ошибка текста после доставленного файла – `PartialDeliveryException` с `mediaResponse`,
+  повторять только текст. Клавиатура
   при пустом тексте и отказ медиа при пустом тексте – `InvalidArgumentException` без
   отправки: пустого сообщения Instagram не принимает.
 - **Нет** `editMessage`, `setCommands`, `getUpdates`, `sendFileId` (многоразовые

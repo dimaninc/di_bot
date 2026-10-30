@@ -32,6 +32,10 @@ final class Auth
         if (!preg_match('/^[0-9]{1,32}$/D', $appId) || $appSecret === '') {
             throw new \InvalidArgumentException('Invalid Instagram app credentials');
         }
+        // 0 у cURL – «без таймаута».
+        if ($timeout < 1) {
+            throw new \InvalidArgumentException('Timeouts must be positive');
+        }
         Config::assertHttpsUrl($redirectUri);
         if ($baseUrl !== '') {
             Config::assertHttpsUrl($baseUrl);

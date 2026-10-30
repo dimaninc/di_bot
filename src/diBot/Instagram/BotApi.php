@@ -263,11 +263,21 @@ class BotApi extends AbstractBotApi
         }
     }
 
+    public function assertMessage(string $text, ?Keyboard $keyboard = null): void
+    {
+        $this->message($text, $keyboard);
+    }
+
     private function send(
         array $recipient,
         #[\SensitiveParameter] string $text,
         ?Keyboard $keyboard
     ): array {
+        return $this->messages($recipient, $this->message($text, $keyboard));
+    }
+
+    private function message(#[\SensitiveParameter] string $text, ?Keyboard $keyboard): array
+    {
         self::assertNotEmpty($text);
         $this->assertText($text);
         $rendered = $keyboard?->render($this->platform()) ?? [];
@@ -288,7 +298,7 @@ class BotApi extends AbstractBotApi
         } else {
             $message = ['text' => $text] + $rendered;
         }
-        return $this->messages($recipient, $message);
+        return $message;
     }
 
     // Пустое сообщение Meta отклонит, а Sender иначе отправил бы его вместо медиа.

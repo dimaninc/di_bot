@@ -558,6 +558,51 @@ final class InstagramApiTest extends TestCase
         self::assertCount(3, $http->requests);
     }
 
+    public function testSenderChecksTextBeforeSendingMedia(): void
+    {
+        [$api, $http] = $this->api([self::sent()]);
+        $photo = fn() => new Media('photo', 'image/jpeg', 1, 'https://files.example/a.jpg');
+        try {
+            // 600 кириллических букв – 1200 байт: больше лимита, файл не должен уйти.
+            (new Sender($api))->send('5', str_repeat('ж', 600), $photo);
+            self::fail();
+        } catch (\InvalidArgumentException) {
+        }
+        self::assertSame([], $http->requests);
+    }
+
+    public function testSenderReportsPartialDeliveryWhenTextFailsAfterMedia(): void
+    {
+        [$api, $http] = $this->api([
+            FakeClient::json(['recipient_id' => '5', 'message_id' => 'MEDIA']),
+            new Response(400, json_encode(['error' => ['code' => 4]])),
+        ]);
+        $photo = fn() => new Media('photo', 'image/jpeg', 1, 'https://files.example/a.jpg');
+        try {
+            (new Sender($api))->send('5', 'Итог', $photo);
+            self::fail();
+        } catch (\diBot\Exception\PartialDeliveryException $e) {
+            self::assertSame('rate_limit', $e->reason);
+            self::assertSame(60, $e->rateLimitDelay());
+            self::assertSame('MEDIA', $e->mediaResponse['message_id']);
+        }
+        self::assertCount(2, $http->requests);
+    }
+
+    public function testSenderIgnoresEmptyKeyboardWithMediaOnly(): void
+    {
+        [$api, $http] = $this->api([self::sent()]);
+        $photo = fn() => new Media('photo', 'image/jpeg', 1, 'https://files.example/a.jpg');
+        (new Sender($api))->send('5', '', $photo, new Keyboard([]));
+        self::assertSame('image', self::body($http)['message']['attachments'][0]['type']);
+    }
+
+    public function testAuthRejectsZeroTimeout(): void
+    {
+        $this->expectExceptionMessage('Timeouts must be positive');
+        new Auth('1', 'secret', 'https://lk.example/cb', timeout: 0);
+    }
+
     public function testSenderUsesFallbackTextWhenMediaIsRefused(): void
     {
         [$api, $http] = $this->api([self::sent()]);
