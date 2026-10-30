@@ -68,6 +68,7 @@ abstract class AbstractBotApi
      * $url – снять вебхук только с этим адресом (сверка со списком у площадки; нет такого –
      * ничего не делать), null – снять любой. Сверка и снятие – два запроса, не атомарно:
      * вебхук, поставленный другим сервисом между ними, тоже может сняться.
+     * Instagram: $url игнорируется, аккаунт отписывается целиком (подписка одна на аккаунт).
      */
     abstract public function deleteWebhook(?string $url = null): void;
     abstract public function getUpdates(?string $cursor = null, int $timeout = 25): PollBatch;
@@ -88,28 +89,13 @@ abstract class AbstractBotApi
         }
         try {
             return $this->http->send($request);
-        } catch (ApiException $e) {
-            // Клиент подменяемый: сохраняем только известные безопасные классификации.
-            $reason = in_array(
-                $e->reason,
-                [
-                    'curl_init',
-                    'network_error',
-                    'response_too_large',
-                    'tls_untrusted_ca',
-                    'tls_ca_file',
-                    'tls_client_certificate',
-                ],
-                true
-            )
-                ? $e->reason
-                : 'network_error';
-            $this->log('Bot transport failed', ['reason' => $reason, 'status' => $e->httpStatus]);
-            throw new ApiException($e->httpStatus, $reason);
-        } catch (\Throwable) {
-            // Не передаём исходное исключение: URL cURL может содержать токен.
-            $this->log('Bot transport failed');
-            throw new ApiException(0, 'network_error');
+        } catch (\Throwable $e) {
+            $safe = ApiException::fromTransport($e);
+            $this->log('Bot transport failed', [
+                'reason' => $safe->reason,
+                'status' => $safe->httpStatus,
+            ]);
+            throw $safe;
         }
     }
 
@@ -135,6 +121,13 @@ abstract class AbstractBotApi
             $result[] = [$nameKey => $command['command'], 'description' => $command['description']];
         }
         return $result;
+    }
+
+    /** Проверка sendMessage() без сети: InvalidArgumentException, если сообщение негодно. */
+    public function assertMessage(string $text, ?Keyboard $keyboard = null): void
+    {
+        $this->assertText($text);
+        $keyboard?->render($this->platform());
     }
 
     protected function assertText(string $text, bool $caption = false): void

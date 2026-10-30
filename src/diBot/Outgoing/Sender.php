@@ -3,7 +3,7 @@ namespace diBot\Outgoing;
 
 use diBot\AbstractBotApi;
 use diBot\Keyboard;
-use diBot\Exception\{ApiException, MediaNotReadyException};
+use diBot\Exception\{ApiException, MediaNotReadyException, PartialDeliveryException};
 
 readonly final class Sender
 {
@@ -20,6 +20,16 @@ readonly final class Sender
         bool $fallbackWhenBlocked = true
     ): array {
         $plainText = $fallbackText ?? $text;
+        // Площадка без подписей (Instagram): медиа, затем текст с кнопками вторым сообщением.
+        $split = $this->api::CAPTION_MAX_UNITS === 0;
+        $mediaSent = null;
+        if ($split && $text === '' && $keyboard !== null && $keyboard->rows !== []) {
+            throw new \InvalidArgumentException('Keyboard needs text on this platform');
+        }
+        if ($split && $text !== '') {
+            // До медиа: иначе файл ушёл бы, а негодный текст упал вторым запросом.
+            $this->api->assertMessage($text, $keyboard);
+        }
         if ($this->mediaEnabled && $mediaFactory !== null) {
             try {
                 $media = $mediaFactory();
@@ -27,20 +37,27 @@ readonly final class Sender
                     if (!($media instanceof Media)) {
                         throw new \LogicException('Factory must return Media or null');
                     }
-                    $media = $media->withCaption($text);
+                    $media = $media->withCaption($split ? '' : $text);
                     $decision = Policy::decide($media, $this->api);
                     if ($decision->transport !== Transport::Refuse) {
-                        return $this->api->sendMedia(
+                        $sent = $this->api->sendMedia(
                             $chatId,
                             $media,
                             $decision->transport,
-                            $keyboard
+                            $split ? null : $keyboard
                         );
-                    }
-                    $this->api->log('Media refused', ['reason' => $decision->reason]);
-                    if ($decision->reason === 'caption_too_long') {
-                        // Ограничение подписи не должно заменять основной текст короткой ссылкой.
+                        if (!$split || $text === '') {
+                            return $sent;
+                        }
+                        // Файл доставлен – вторым сообщением идёт основной текст, а не запасной.
+                        $mediaSent = $sent;
                         $plainText = $text;
+                    } else {
+                        $this->api->log('Media refused', ['reason' => $decision->reason]);
+                        if ($decision->reason === 'caption_too_long') {
+                            // Ограничение подписи не должно заменять основной текст короткой ссылкой.
+                            $plainText = $text;
+                        }
                     }
                 }
             } catch (ApiException $e) {
@@ -58,6 +75,13 @@ readonly final class Sender
             }
         }
         // Вне try: ошибка запасного текста не должна отправить его повторно.
-        return $this->api->sendMessage($chatId, $plainText, $keyboard);
+        if ($mediaSent === null) {
+            return $this->api->sendMessage($chatId, $plainText, $keyboard);
+        }
+        try {
+            return $this->api->sendMessage($chatId, $plainText, $keyboard);
+        } catch (ApiException $e) {
+            throw new PartialDeliveryException($e, $mediaSent);
+        }
     }
 }

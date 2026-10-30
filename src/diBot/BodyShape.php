@@ -49,6 +49,12 @@ final class BodyShape
         'description',
         'updates',
         'marker',
+        'attachment',
+        'template_type',
+        'quick_replies',
+        'content_type',
+        'title',
+        'comment_id',
     ];
 
     public static function describe(mixed $body, int $depth = 0): string

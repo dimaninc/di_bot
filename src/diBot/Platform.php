@@ -18,7 +18,7 @@ enum Platform: int
         return match ($this) {
             self::Telegram => new Telegram\BotApi($config, $http, $logger),
             self::Max => new Max\BotApi($config, $http, $logger),
-            self::Instagram => throw new \LogicException('Instagram is not implemented'),
+            self::Instagram => new Instagram\BotApi($config, $http, $logger),
         };
     }
 
@@ -27,7 +27,8 @@ enum Platform: int
         return match ($this) {
             self::Telegram => Telegram\Update::fromArray($data),
             self::Max => Max\Update::fromArray($data),
-            self::Instagram => null,
+            // Одно событие из Instagram\Webhook::events(), а не тело вебхука целиком.
+            self::Instagram => Instagram\Update::fromArray($data),
         };
     }
 }
