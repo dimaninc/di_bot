@@ -133,7 +133,8 @@ final class Auth
     /**
      * Аккаунты Instagram из выданного доступа. assigned_instagram_accounts бывает пустым и при
      * выданном аккаунте – тогда owned_instagram_accounts бизнеса клиента; отказ в правах на
-     * нём (нужен business_management) – «не найдено», а не ошибка.
+     * нём (нужен business_management) – «не найдено», а не ошибка. Этот запасной список –
+     * все аккаунты портфолио, он может быть шире выданного при входе.
      * @return list<Account>
      */
     public function accounts(#[\SensitiveParameter] string $token): array

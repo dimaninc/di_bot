@@ -87,9 +87,11 @@ TLS проверен системным набором CA, IP соединени
   `GET /oauth/access_token` даёт токен BISU без `expires_in`; `/me` – системный
   пользователь, вызовы аккаунта – `/{ig-user-id}/…`; `graph.instagram.com` с этим токеном
   не работает.
+- [x] `GET /me?fields=id,client_business_id` с токеном BISU отдаёт id портфолио клиента
+  (31.10.2026).
 - [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте, а
   `owned_instagram_accounts` требует `business_management`: проверить поиск аккаунта с
-  этим разрешением в конфигурации входа.
+  этим разрешением в конфигурации входа – и шире ли этот список выданного при входе.
 - [x] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека):
   `/me`, `assigned_instagram_accounts`, `media`, `messages` – проверено 31.10.2026.
 - [ ] Обмен кода через Worker (`<baseUrl>/v26.0/oauth/access_token` →
@@ -117,8 +119,9 @@ TLS проверен системным набором CA, IP соединени
 
 - [x] Личка (текст, quick replies, шаблон button) и private reply с шаблоном button через
   `POST /{ig-user-id}/messages`, публичный ответ `POST /{comment}/replies` (31.10.2026).
-- [ ] Ошибка «account owner has disabled access to Instagram Direct Messaging…» даёт
-  `messaging_disabled`; после включения «Доступа к сообщениям» отправка проходит.
+- [x] Ошибка «account owner has disabled access to Instagram Direct Messaging…» – код 200
+  (и у `/messages`, и у профиля – там текст «…instagram direct messages»), даёт
+  `messaging_disabled`; после включения «Доступа к сообщениям» отправка проходит (31.10.2026).
 - [ ] Private reply на комментарий, найденный через `getComments()`, а не пришедший
   вебхуком.
 - [ ] Повторный private reply и ответ на комментарий старше 7 дней: зафиксировать

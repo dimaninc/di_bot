@@ -429,6 +429,13 @@ final class InstagramApiTest extends TestCase
                     false,
                     0,
                 ],
+                // Тот же отказ у профиля собеседника – другой текст и регистр (живьём, 31.10.2026).
+                [
+                    $error(200, null, 'The account owner has disabled access to instagram direct messages.'),
+                    'messaging_disabled',
+                    false,
+                    0,
+                ],
                 [
                     $error(200, null, 'App does not have Advanced Access. The recipient user does not have role on app'),
                     'api_error',

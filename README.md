@@ -339,8 +339,10 @@ the application's responsibility.
 (`graph.facebook.com`, Graph API `Instagram\BotApi::GRAPH_VERSION`, now `v26.0`).
 `Config::token` is the Business Integration System User (BISU) token from `Instagram\Auth`,
 sent only as `Authorization: Bearer`, never in the URL. `Config::accountId` is the
-Instagram account ID (`17841…`, from `Auth::accounts()`); it is required, numeric, and every
-call goes to `/{accountId}/…` – with this token `/me` is the system user, not the account.
+Instagram account ID (`17841…`, from `Auth::accounts()`), numeric. Account calls
+(`getMe()`, messages, media, subscriptions) go to `/{accountId}/…` and fail without it –
+with this token `/me` is the system user, not the account. Comment, reply and profile calls
+are addressed by their own IDs.
 A custom `baseUrl` (a Worker proxy) requires `proxySecret`, sent as `X-Proxy-Auth`, as for
 Telegram. The bot never writes first: a message is allowed within 24 hours of the user's
 last message, or as one private reply to a comment.
@@ -358,7 +360,10 @@ tokens) is removed without a compatibility layer. `Auth` takes a `configId` and 
 `longLived()`/`refresh()`; `authorizeUrl()` takes no scopes; `Token` has only
 `accessToken` and `expiresIn`; `Config::accountId` is required for Instagram; `getMe()`
 no longer returns `app_scoped_id`. Accounts connected through Instagram Login must log in
-again.
+again. A proxy must now forward everything, including `/v26.0/oauth/access_token`, to
+`graph.facebook.com`: update it before the library. Any `baseUrl` other than
+`graph.facebook.com` is treated as a proxy, so an old explicit `https://graph.instagram.com`
+fails with "Instagram proxy requires a secret".
 
 ### Webhook, events and routing
 
@@ -465,8 +470,9 @@ redacts the token.
 That list can be empty even when an account was granted, so the fallback is
 `/{client_business_id}/owned_instagram_accounts`; it needs `business_management` in the
 configuration, and a permission error there (codes 10, 200–299) means "nothing found", not
-a failure. An empty result means the client granted no account: ask them to log in again
-and pick one.
+a failure. The fallback lists every account the client's portfolio owns, which may be wider
+than the grant: an account outside it fails on the first call with an access error. An
+empty result means the client granted no account: ask them to log in again and pick one.
 
 Meta takes the code exchange parameters, including the app secret, only in the query
 string; the library never logs URLs and scrubs client errors. Grant reads send the token
@@ -568,6 +574,6 @@ Instagram, checked on 2026-10-29:
 [user profile](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/user-profile),
 [comment moderation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/comment-moderation),
 [error codes](https://developers.facebook.com/docs/messenger-platform/error-codes).
-Facebook Login for Business (login URL, BISU token, account discovery, `/{accountId}/…`
-calls) was verified live on Graph API v26.0 on 2026-10-31.
+Facebook Login for Business (login URL, BISU token, `/{accountId}/…` calls) was verified
+live on Graph API v26.0 on 2026-10-31; account discovery is not (see ACCEPTANCE.md).
 [Package specification](SPEC.md).
