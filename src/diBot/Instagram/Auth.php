@@ -42,7 +42,7 @@ final class Auth
             throw new \InvalidArgumentException('Timeouts must be positive');
         }
         Config::assertHttpsUrl($redirectUri);
-        if ($baseUrl !== '') {
+        if ($this->proxied()) {
             Config::assertHttpsUrl($baseUrl);
             if (parse_url($baseUrl, PHP_URL_QUERY) !== null) {
                 throw new \InvalidArgumentException('Instagram proxy URL must not contain a query');
@@ -61,8 +61,8 @@ final class Auth
         $this->http = $http ?? new CurlClient();
     }
 
-    /** Разрешения задаёт конфигурация входа, scope не передаётся; $relogin – prompt=login. */
-    public function authorizeUrl(string $state, bool $relogin = false): string
+    /** Разрешения задаёт конфигурация входа, scope не передаётся. */
+    public function authorizeUrl(string $state): string
     {
         if ($state === '') {
             throw new \InvalidArgumentException('State is required');
@@ -75,9 +75,6 @@ final class Auth
             'override_default_response_type' => 'true',
             'state' => $state,
         ];
-        if ($relogin) {
-            $query['prompt'] = 'login';
-        }
         return self::AUTHORIZE_URL . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
@@ -133,8 +130,8 @@ final class Auth
     /**
      * Аккаунты Instagram из выданного доступа. assigned_instagram_accounts бывает пустым и при
      * выданном аккаунте – тогда owned_instagram_accounts бизнеса клиента; отказ в правах на
-     * нём (нужен business_management) – «не найдено», а не ошибка. Этот запасной список –
-     * все аккаунты портфолио, он может быть шире выданного при входе.
+     * нём (нужен business_management) – «не найдено», а не ошибка. Запасной список, видимо, –
+     * все аккаунты портфолио, шире выданного при входе: аккаунт выбирает клиент, не первый.
      * @return list<Account>
      */
     public function accounts(#[\SensitiveParameter] string $token): array
@@ -167,7 +164,8 @@ final class Auth
             if ($after !== null) {
                 $query['after'] = $after;
             }
-            $data = $this->graph($path, $query, $token, $deniedIsEmpty);
+            // Отказ в правах – «не найдено» только на первой странице: дальше это обрыв списка.
+            $data = $this->graph($path, $query, $token, $deniedIsEmpty && $page === 0);
             if ($data === null) {
                 break;
             }
@@ -210,11 +208,11 @@ final class Auth
             }
             $headers[] = 'Authorization: Bearer ' . $token;
         }
-        if ($this->baseUrl !== '') {
+        if ($this->proxied()) {
             $headers[] = 'X-Proxy-Auth: ' . $this->proxySecret;
         }
         $url =
-            ($this->baseUrl !== '' ? rtrim($this->baseUrl, '/') : self::GRAPH_BASE_URL) .
+            ($this->proxied() ? rtrim($this->baseUrl, '/') : self::GRAPH_BASE_URL) .
             '/' .
             BotApi::GRAPH_VERSION .
             $path .
@@ -232,6 +230,12 @@ final class Auth
             throw $error;
         }
         return $response->json();
+    }
+
+    // Как в BotApi: явный адрес Graph – не прокси, секрет прокси в Meta не уходит.
+    private function proxied(): bool
+    {
+        return $this->baseUrl !== '' && rtrim($this->baseUrl, '/') !== self::GRAPH_BASE_URL;
     }
 
     // Коды Graph API: 10 и 200–299 – отказ в разрешении.

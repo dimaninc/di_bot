@@ -64,8 +64,6 @@ final class InstagramAuthTest extends TestCase
             ],
             $q
         );
-        parse_str(parse_url($auth->authorizeUrl('st-2', true), PHP_URL_QUERY), $q);
-        self::assertSame('login', $q['prompt']);
         self::assertStringNotContainsString('app-secret', $url);
         self::assertStringNotContainsString('app-secret', print_r($auth, true));
         $this->expectException(\InvalidArgumentException::class);
@@ -194,9 +192,15 @@ final class InstagramAuthTest extends TestCase
             ]);
             self::assertSame([], self::auth($http)->accounts(self::TOKEN), (string) $code);
         }
-        // Прочие ошибки запасного запроса и любая ошибка основного – не «пусто».
+        // Прочие ошибки запасного запроса, отказ на его второй странице и любая ошибка
+        // основного – не «пусто».
+        $firstPage = FakeClient::json([
+            'data' => [['id' => '17841400000000001', 'username' => 'a']],
+            'paging' => ['cursors' => ['after' => 'c1'], 'next' => 'https://graph.facebook.com/next'],
+        ]);
         foreach (
             [
+                [[FakeClient::json(['data' => []]), FakeClient::json(['client_business_id' => '9']), $firstPage, self::denied(200)], 'api_error'],
                 [[FakeClient::json(['data' => []]), FakeClient::json(['client_business_id' => '9']), self::denied(190)], 'invalid_token'],
                 [[FakeClient::json(['data' => []]), FakeClient::json(['client_business_id' => '9']), self::denied(4)], 'rate_limit'],
                 [[self::denied(200)], 'api_error'],
@@ -228,6 +232,13 @@ final class InstagramAuthTest extends TestCase
         self::assertSame(['X-Proxy-Auth: px'], $http->requests[0]->headers);
         self::assertSame(['Authorization: Bearer ' . self::TOKEN, 'X-Proxy-Auth: px'], $http->requests[1]->headers);
         self::assertStringNotContainsString('px', print_r($auth, true));
+
+        // Явный адрес Graph – не прокси: секрет не нужен и в Meta не уходит.
+        $http = new FakeClient([FakeClient::json(['data' => []])]);
+        self::auth($http, 'https://graph.facebook.com/', 'px')->permissions(self::TOKEN);
+        self::assertSame('https://graph.facebook.com/v26.0/me/permissions', $http->requests[0]->url);
+        self::assertSame(['Authorization: Bearer ' . self::TOKEN], $http->requests[0]->headers);
+        self::auth(new FakeClient([]), 'https://graph.facebook.com');
     }
 
     public function testSecretsNeverReachExceptions(): void

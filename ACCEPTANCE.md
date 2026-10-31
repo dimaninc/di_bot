@@ -150,7 +150,9 @@ TLS проверен системным набором CA, IP соединени
 
 ## Источники
 
+- [Instagram: вход Unified Login](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/authentication)
 - [Instagram: Messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api)
+  (раздел Instagram Login; форма запросов та же, отличаются хост и `/{accountId}`)
 - [Instagram: вебхуки](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup)
 - [Messenger Platform: коды ошибок](https://developers.facebook.com/docs/messenger-platform/error-codes)
 - [MAX: регистрация подписки и секрет](https://dev.max.ru/docs-api/methods/POST/subscriptions)

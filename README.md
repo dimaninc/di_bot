@@ -435,8 +435,8 @@ Attachment URLs are signed CDN links: download them promptly with
 ### Accounts and OAuth
 
 `getMe()` sends GET `/{accountId}?fields=id,username` and returns
-`['account_id' => …, 'username' => …]`; `account_id` equals `Config::accountId` and the
-webhook `entry_id`. `setWebhook($url)` ignores `$url` and subscribes the account to
+`['account_id' => …, 'username' => …]` as Meta returns them (not compared with
+`Config::accountId`); `account_id` is the webhook `entry_id`. `setWebhook($url)` ignores `$url` and subscribes the account to
 `UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
 POST `/{accountId}/subscribed_apps`; `deleteWebhook()` sends DELETE
 `/{accountId}/subscribed_apps`. Unlike other platforms, `deleteWebhook($url)` ignores
@@ -451,7 +451,6 @@ application keeps the state and stores the token encrypted:
 ```php
 $auth = new Auth($appId, $appSecret, $configId, $redirectUri, baseUrl: $proxy, proxySecret: $secret);
 $url = $auth->authorizeUrl($state);          // facebook.com/v26.0/dialog/oauth?config_id=…
-$url = $auth->authorizeUrl($state, true);    // the same with prompt=login (switch account)
 $token = $auth->exchangeCode($code);         // a trailing "#_=_" is stripped
 $auth->permissions($token->accessToken);     // ['instagram_basic', …] – granted only
 $auth->clientBusinessId($token->accessToken); // the client's business portfolio, '' if none
@@ -469,10 +468,12 @@ redacts the token.
 `/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages).
 That list can be empty even when an account was granted, so the fallback is
 `/{client_business_id}/owned_instagram_accounts`; it needs `business_management` in the
-configuration, and a permission error there (codes 10, 200–299) means "nothing found", not
-a failure. The fallback lists every account the client's portfolio owns, which may be wider
-than the grant: an account outside it fails on the first call with an access error. An
-empty result means the client granted no account: ask them to log in again and pick one.
+configuration, and a permission error on its first page (codes 10, 200–299) means "nothing
+found", not a failure; on a later page it is an error. Neither path is verified live yet
+(ACCEPTANCE.md). The fallback presumably lists every account the client's portfolio owns,
+which may be wider than the grant, so let the client pick the account rather than taking
+the first one. An empty result means the client granted no account: ask them to log in
+again and pick one.
 
 Meta takes the code exchange parameters, including the app secret, only in the query
 string; the library never logs URLs and scrubs client errors. Grant reads send the token
@@ -566,7 +567,9 @@ Sources checked on 2026-09-28: [Telegram Bot API](https://core.telegram.org/bots
 [MAX webhook removal](https://dev.max.ru/docs-api/methods/DELETE/subscriptions),
 [MAX message editing](https://dev.max.ru/docs-api/methods/PUT/messages),
 [MAX callback answers](https://dev.max.ru/docs-api/methods/POST/answers).
-Instagram, checked on 2026-10-29:
+Instagram, checked on 2026-10-29 (pages under Instagram Login: the request shapes are the
+same with Facebook Login, only the host and `/{accountId}` differ; login itself –
+[Unified Login](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/authentication)):
 [messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api),
 [private replies](https://developers.facebook.com/documentation/instagram-platform/private-replies),
 [webhooks](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup),
