@@ -4,13 +4,14 @@ namespace diBot\Tests;
 use diBot\{Button, Config, Keyboard, Platform};
 use diBot\Exception\{ApiException, DownloadException};
 use diBot\Http\Response;
-use diBot\Instagram\{Auth, BotApi, Comment, MediaItem, UserProfile};
+use diBot\Instagram\{BotApi, Comment, MediaItem, UserProfile};
 use diBot\Outgoing\{Media, Policy, Sender, Transport};
 use PHPUnit\Framework\TestCase;
 
 final class InstagramApiTest extends TestCase
 {
-    private const TOKEN = 'IGAAsecretTOKEN123';
+    private const TOKEN = 'EAAsecretTOKEN123';
+    private const ACCOUNT = '17841400000000001';
     private array $logs = [];
 
     private function api(array $responses, string $baseUrl = '', string $proxy = ''): array
@@ -25,7 +26,7 @@ final class InstagramApiTest extends TestCase
                 $this->logs[] = $message . ' ' . json_encode($context);
             }
         };
-        $config = new Config(self::TOKEN, $baseUrl, proxySecret: $proxy);
+        $config = new Config(self::TOKEN, $baseUrl, proxySecret: $proxy, accountId: self::ACCOUNT);
         return [Platform::Instagram->api($config, $http, $logger), $http];
     }
 
@@ -47,7 +48,7 @@ final class InstagramApiTest extends TestCase
         self::assertSame(['recipient_id' => '5', 'message_id' => 'mid'], $api->sendMessage('5', 'Привет'));
         $r = $http->requests[0];
         self::assertSame('POST', $r->method);
-        self::assertSame('https://graph.instagram.com/v26.0/me/messages', $r->url);
+        self::assertSame('https://graph.facebook.com/v26.0/17841400000000001/messages', $r->url);
         self::assertContains('Authorization: Bearer ' . self::TOKEN, $r->headers);
         self::assertStringNotContainsString('X-Proxy-Auth', implode("\n", $r->headers));
         self::assertSame(
@@ -60,7 +61,7 @@ final class InstagramApiTest extends TestCase
     {
         [$api, $http] = $this->api([self::sent()], 'https://ig-api.example', 'proxy-secret');
         $api->sendMessage('5', 'x');
-        self::assertSame('https://ig-api.example/v26.0/me/messages', $http->requests[0]->url);
+        self::assertSame('https://ig-api.example/v26.0/17841400000000001/messages', $http->requests[0]->url);
         self::assertContains('X-Proxy-Auth: proxy-secret', $http->requests[0]->headers);
         [$api] = $this->api([], 'https://ig-api.example');
         $this->expectException(\InvalidArgumentException::class);
@@ -175,7 +176,7 @@ final class InstagramApiTest extends TestCase
         self::assertSame('button', $body['message']['attachment']['payload']['template_type']);
         self::assertSame(['id' => '17873440459141029'], $api->replyToComment('17900000000000001', 'Ответили в личку'));
         self::assertSame(
-            'https://graph.instagram.com/v26.0/17900000000000001/replies',
+            'https://graph.facebook.com/v26.0/17900000000000001/replies',
             $http->requests[1]->url
         );
         self::assertSame(['message' => 'Ответили в личку'], self::body($http, 1));
@@ -211,7 +212,7 @@ final class InstagramApiTest extends TestCase
         $page = $api->getComments('18000000000000001', 'QVFIU0', 50);
         $url = $http->requests[0]->url;
         self::assertStringStartsWith(
-            'https://graph.instagram.com/v26.0/18000000000000001/comments?fields=',
+            'https://graph.facebook.com/v26.0/18000000000000001/comments?fields=',
             $url
         );
         self::assertStringContainsString('limit=50', $url);
@@ -258,7 +259,7 @@ final class InstagramApiTest extends TestCase
         ]);
         $page = $api->getMedia(limit: 10);
         self::assertStringStartsWith(
-            'https://graph.instagram.com/v26.0/me/media?fields=',
+            'https://graph.facebook.com/v26.0/17841400000000001/media?fields=',
             $http->requests[0]->url
         );
         self::assertInstanceOf(MediaItem::class, $page->items[0]);
@@ -284,7 +285,7 @@ final class InstagramApiTest extends TestCase
         $p = $api->getUserProfile('1234567890123456');
         self::assertInstanceOf(UserProfile::class, $p);
         self::assertStringStartsWith(
-            'https://graph.instagram.com/v26.0/1234567890123456?fields=',
+            'https://graph.facebook.com/v26.0/1234567890123456?fields=',
             $http->requests[0]->url
         );
         self::assertStringContainsString('is_user_follow_business', urldecode($http->requests[0]->url));
@@ -299,29 +300,45 @@ final class InstagramApiTest extends TestCase
         self::assertNull($unknown->followerCount);
     }
 
-    public function testGetMeExposesWebhookAccountId(): void
+    public function testGetMeReadsTheAccountNotTheSystemUser(): void
     {
-        foreach (
-            [
-                ['user_id' => '17841400000000001', 'username' => 'shop', 'id' => '2600000000000001'],
-                ['data' => [['user_id' => '17841400000000001', 'username' => 'shop', 'id' => '2600000000000001']]],
-            ]
-            as $response
-        ) {
-            [$api, $http] = $this->api([FakeClient::json($response)]);
-            self::assertSame(
-                [
-                    'account_id' => '17841400000000001',
-                    'username' => 'shop',
-                    'app_scoped_id' => '2600000000000001',
-                ],
-                $api->getMe()
-            );
-            self::assertStringContainsString('fields=user_id', $http->requests[0]->url);
-        }
-        [$api] = $this->api([FakeClient::json(['id' => '1'])]);
+        [$api, $http] = $this->api([
+            FakeClient::json(['id' => self::ACCOUNT, 'username' => 'shop']),
+            FakeClient::json(['username' => 'shop']),
+        ]);
+        self::assertSame(['account_id' => self::ACCOUNT, 'username' => 'shop'], $api->getMe());
+        self::assertSame(
+            'https://graph.facebook.com/v26.0/' . self::ACCOUNT . '?fields=' . rawurlencode('id,username'),
+            $http->requests[0]->url
+        );
         $this->expectException(ApiException::class);
         $api->getMe();
+    }
+
+    public function testAccountIdIsRequiredAndNumericBeforeNetwork(): void
+    {
+        foreach (['', '../me', 'me', '1/2'] as $accountId) {
+            $api = new BotApi(new Config(self::TOKEN, accountId: $accountId), $http = new FakeClient());
+            foreach (
+                [
+                    fn() => $api->sendMessage('5', 'x'),
+                    fn() => $api->sendPrivateReply('17900000000000001', 'x'),
+                    fn() => $api->getMe(),
+                    fn() => $api->getMedia(),
+                    fn() => $api->setWebhook(''),
+                    fn() => $api->deleteWebhook(),
+                ]
+                as $i => $call
+            ) {
+                try {
+                    $call();
+                    self::fail($accountId . ':' . $i);
+                } catch (\InvalidArgumentException $e) {
+                    self::assertStringContainsString('accountId', $e->getMessage());
+                }
+            }
+            self::assertSame([], $http->requests);
+        }
     }
 
     public function testWebhookSubscriptionOfTheAccount(): void
@@ -334,7 +351,7 @@ final class InstagramApiTest extends TestCase
         $r = $http->requests[0];
         self::assertSame('POST', $r->method);
         self::assertSame(
-            'https://graph.instagram.com/v26.0/me/subscribed_apps?subscribed_fields=' .
+            'https://graph.facebook.com/v26.0/17841400000000001/subscribed_apps?subscribed_fields=' .
                 rawurlencode('comments,live_comments,messages,messaging_postbacks'),
             $r->url
         );
@@ -342,7 +359,7 @@ final class InstagramApiTest extends TestCase
         $api->deleteWebhook('https://ignored.example/hook');
         self::assertSame('DELETE', $http->requests[1]->method);
         self::assertSame(
-            'https://graph.instagram.com/v26.0/me/subscribed_apps',
+            'https://graph.facebook.com/v26.0/17841400000000001/subscribed_apps',
             $http->requests[1]->url
         );
     }
@@ -406,6 +423,18 @@ final class InstagramApiTest extends TestCase
                 [$error(100, 2534025), 'reply_unavailable', false, 0],
                 [$error(100, null, 'User consent is required to access user profile'), 'consent_required', false, 0],
                 [$error(190), 'invalid_token', false, 0],
+                [
+                    $error(200, null, 'The account owner has disabled access to Instagram Direct Messaging Outside of Instagram App.'),
+                    'messaging_disabled',
+                    false,
+                    0,
+                ],
+                [
+                    $error(200, null, 'App does not have Advanced Access. The recipient user does not have role on app'),
+                    'api_error',
+                    false,
+                    0,
+                ],
                 [$error(551), 'api_error', true, 0],
                 [$error(10, 2018108), 'api_error', true, 0],
                 [$error(4), 'rate_limit', false, 60],
@@ -482,10 +511,10 @@ final class InstagramApiTest extends TestCase
             } catch (\InvalidArgumentException) {
             }
         }
-        $api = new BotApi(new Config('a|b.c'), $http = new FakeClient([self::sent()]));
+        $api = new BotApi(new Config('a|b.c', accountId: '1'), $http = new FakeClient([self::sent()]));
         $api->sendMessage('5', 'x');
         self::assertCount(1, $http->requests);
-        $api = new BotApi(new Config('a:b'), $http = new FakeClient([self::sent()]));
+        $api = new BotApi(new Config('a:b', accountId: '1'), $http = new FakeClient([self::sent()]));
         try {
             $api->sendMessage('5', 'x');
             self::fail();
@@ -597,12 +626,6 @@ final class InstagramApiTest extends TestCase
         self::assertSame('image', self::body($http)['message']['attachments'][0]['type']);
     }
 
-    public function testAuthRejectsZeroTimeout(): void
-    {
-        $this->expectExceptionMessage('Timeouts must be positive');
-        new Auth('1', 'secret', 'https://lk.example/cb', timeout: 0);
-    }
-
     public function testSenderUsesFallbackTextWhenMediaIsRefused(): void
     {
         [$api, $http] = $this->api([self::sent()]);
@@ -693,12 +716,6 @@ final class InstagramApiTest extends TestCase
         }
     }
 
-    public function testProxyUrlWithQueryIsReportedAsSuch(): void
-    {
-        $this->expectExceptionMessage('must not contain a query');
-        new \diBot\Instagram\Auth('1', 'secret', 'https://lk.example/cb', null, 'https://proxy.example/?a=1', 'proxy');
-    }
-
     public function testDownloadUsesPublicCdnUrl(): void
     {
         [$api, $http] = $this->api([new Response(200, 'img', ['content-type' => 'image/jpeg'])]);
@@ -736,123 +753,5 @@ final class InstagramApiTest extends TestCase
         } catch (\LogicException) {
         }
         self::assertSame([], $controller->handled);
-    }
-
-    public function testAuthorizeUrl(): void
-    {
-        $auth = new Auth('990602627938098', 'app-secret', 'https://gagabot.example/ig/callback');
-        $url = $auth->authorizeUrl('st-1', [
-            'instagram_business_basic',
-            'instagram_business_manage_messages',
-        ]);
-        self::assertStringStartsWith('https://www.instagram.com/oauth/authorize?', $url);
-        parse_str(parse_url($url, PHP_URL_QUERY), $q);
-        self::assertSame(
-            [
-                'client_id' => '990602627938098',
-                'redirect_uri' => 'https://gagabot.example/ig/callback',
-                'response_type' => 'code',
-                'scope' => 'instagram_business_basic,instagram_business_manage_messages',
-                'state' => 'st-1',
-            ],
-            $q
-        );
-        self::assertStringNotContainsString('app-secret', $url);
-        self::assertStringNotContainsString('app-secret', print_r($auth, true));
-        $this->expectException(\InvalidArgumentException::class);
-        $auth->authorizeUrl('s', ['bad scope']);
-    }
-
-    public function testAuthFlowDirect(): void
-    {
-        $http = new FakeClient([
-            FakeClient::json([
-                'data' => [
-                    [
-                        'access_token' => 'SHORT',
-                        'user_id' => '1020',
-                        'permissions' => 'instagram_business_basic,instagram_business_manage_messages',
-                    ],
-                ],
-            ]),
-            FakeClient::json(['access_token' => 'LONG', 'token_type' => 'bearer', 'expires_in' => 5184000]),
-            FakeClient::json(['access_token' => 'NEWER', 'token_type' => 'bearer', 'expires_in' => 5183944]),
-            FakeClient::json(['access_token' => 'FLAT', 'user_id' => 7, 'permissions' => ['a']]),
-        ]);
-        $auth = new Auth('1', 'app-secret', 'https://app.example/cb', $http);
-        $short = $auth->exchangeCode('AQBx#_');
-        self::assertSame(['SHORT', '1020', 0], [$short->accessToken, $short->userId, $short->expiresIn]);
-        self::assertSame(
-            ['instagram_business_basic', 'instagram_business_manage_messages'],
-            $short->permissions
-        );
-        $r = $http->requests[0];
-        self::assertSame('POST', $r->method);
-        self::assertSame('https://api.instagram.com/oauth/access_token', $r->url);
-        parse_str($r->body, $form);
-        self::assertSame(
-            [
-                'client_id' => '1',
-                'client_secret' => 'app-secret',
-                'grant_type' => 'authorization_code',
-                'redirect_uri' => 'https://app.example/cb',
-                'code' => 'AQBx',
-            ],
-            $form
-        );
-        $long = $auth->longLived('SHORT');
-        self::assertSame(['LONG', 5184000], [$long->accessToken, $long->expiresIn]);
-        self::assertSame('GET', $http->requests[1]->method);
-        self::assertSame(
-            'https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=app-secret&access_token=SHORT',
-            $http->requests[1]->url
-        );
-        $newer = $auth->refresh('LONG');
-        self::assertSame('NEWER', $newer->accessToken);
-        self::assertSame(
-            'https://graph.instagram.com/refresh_access_token?grant_type=ig_refresh_token&access_token=LONG',
-            $http->requests[2]->url
-        );
-        $flat = $auth->exchangeCode('c');
-        self::assertSame(['FLAT', '7', ['a']], [$flat->accessToken, $flat->userId, $flat->permissions]);
-        self::assertStringNotContainsString('LONG', print_r($long, true));
-        foreach ($http->requests as $request) {
-            self::assertStringNotContainsString('X-Proxy-Auth', implode("\n", $request->headers));
-        }
-    }
-
-    public function testAuthProxyRoutingAndErrors(): void
-    {
-        $http = new FakeClient([
-            FakeClient::json(['access_token' => 'S', 'user_id' => '1']),
-            FakeClient::json(['access_token' => 'L', 'expires_in' => 1]),
-            FakeClient::json(['access_token' => 'R', 'expires_in' => 1]),
-            FakeClient::json(['error' => ['code' => 190, 'message' => 'token LONG expired']], 400),
-            new \RuntimeException('https://graph.instagram.com/access_token?client_secret=app-secret'),
-            FakeClient::json(['token_type' => 'bearer']),
-        ]);
-        $auth = new Auth('1', 'app-secret', 'https://app.example/cb', $http, 'https://ig-api.example/', 'px');
-        $auth->exchangeCode('c');
-        $auth->longLived('S');
-        $auth->refresh('L');
-        self::assertSame('https://ig-api.example/oauth/access_token', $http->requests[0]->url);
-        self::assertStringStartsWith('https://ig-api.example/access_token?', $http->requests[1]->url);
-        self::assertStringStartsWith('https://ig-api.example/refresh_access_token?', $http->requests[2]->url);
-        foreach ($http->requests as $request) {
-            self::assertContains('X-Proxy-Auth: px', $request->headers);
-        }
-        foreach (['invalid_token', 'network_error', 'invalid_token_response'] as $reason) {
-            try {
-                $auth->refresh('LONG');
-                self::fail();
-            } catch (ApiException $e) {
-                self::assertSame($reason, $e->reason);
-                self::assertStringNotContainsString('LONG', $e->getMessage());
-                self::assertStringNotContainsString('app-secret', $e->getMessage());
-                self::assertNull($e->getPrevious());
-            }
-        }
-        $this->expectException(\InvalidArgumentException::class);
-        new Auth('1', 'app-secret', 'https://app.example/cb', $http, 'https://ig-api.example');
     }
 }

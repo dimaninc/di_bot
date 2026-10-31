@@ -68,6 +68,9 @@ final class Errors
             // Код у отказа без согласия не документирован, только текст: по нему и решаем,
             // сам текст в исключение не попадает.
             stripos($message, 'consent is required') !== false => 'consent_required',
+            // Клиент не включил «Доступ к сообщениям» в настройках Instagram; тоже только текст.
+            $code === 200 && stripos($message, 'disabled access to Instagram Direct') !== false
+                => 'messaging_disabled',
             default => 'api_error',
         };
         // 551 – «не принимает сообщения от вас», 2018108 – получатель сейчас недоступен.

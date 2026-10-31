@@ -55,9 +55,9 @@ src/diBot/
   Instagram/BotApi.php      Send API, private replies, комментарии, профиль, подписка аккаунта
   Instagram/Update.php      одно событие вебхука: личка или комментарий
   Instagram/Webhook.php     вебхук приложения: подтверждение, подпись, нарезка на события
-  Instagram/Auth.php        Business Login: ссылка входа, обмен кода, долгоживущий токен
+  Instagram/Auth.php        Facebook Login for Business: ссылка входа, токен BISU, выданные аккаунты
   Instagram/Errors.php      классификация ошибок Graph API
-  Instagram/Token.php, Comment.php, MediaItem.php, Page.php, UserProfile.php   DTO
+  Instagram/Token.php, Account.php, Comment.php, MediaItem.php, Page.php, UserProfile.php   DTO
   Outgoing/Media.php        DTO файла: вид, mime, размер, url, локальный путь, подпись
   Outgoing/Policy.php       решение «как отправлять»: по url, загрузкой или отказ
   Outgoing/Decision.php
@@ -215,24 +215,31 @@ MAX дообрабатывает файл после ответа хранили
 
 ### Instagram
 
-Instagram API with Instagram Login (`graph.instagram.com`), версия Graph API –
+Instagram API with Facebook Login for Business (`graph.facebook.com`), версия Graph API –
 константа `GRAPH_VERSION` (`v26.0`). Контракт для приложения – README, «Instagram».
+С 0.5.0 Instagram Login (`graph.instagram.com`) удалён без слоя совместимости.
 
-- **Токен** – долгоживущий токен пользователя Instagram, только заголовком
-  `Authorization: Bearer`, не в URL. Прокси (Cloudflare Worker) – как у Telegram:
-  `baseUrl` плюс обязательный `X-Proxy-Auth`. Получение и обновление токена – `Auth`,
-  хранение и график обновления – приложение.
+- **Токен** – бессрочный токен системного пользователя бизнес-интеграции (BISU), только
+  заголовком `Authorization: Bearer`, не в URL. Прокси (Cloudflare Worker) – как у
+  Telegram: `baseUrl` плюс обязательный `X-Proxy-Auth`. Вход по конфигурации
+  (`config_id`, без scope), обмен кода и поиск выданных аккаунтов – `Auth`, хранение –
+  приложение. Обновлять токен не нужно.
+- **Аккаунт – `Config::accountId`** (IG user id, обязателен для Instagram): с токеном BISU
+  `/me` – системный пользователь, поэтому все вызовы идут на `/{accountId}/…`.
+  `Auth::accounts()` читает `/me/assigned_instagram_accounts`; список бывает пустым и при
+  выданном аккаунте – тогда `/{client_business_id}/owned_instagram_accounts`, где отказ в
+  правах (коды 10, 200–299) означает «не найдено».
 - **Вебхук – уровня приложения Meta**, а не бота: один адрес на все аккаунты, задаётся в
   панели Meta. `Webhook` подтверждает адрес (`hub.challenge`), проверяет
   `X-Hub-Signature-256` и режет тело на самостоятельные события с `entry_id`; приложение
   хранит событие строкой и выбирает бота по `entry_id`. `AbstractController` для
   Instagram не используется: `webhook()` бросает `LogicException`, `poll()` отказывает до
   `deleteWebhook()` – иначе аккаунт отписался бы от событий.
-- **`setWebhook()` подписывает аккаунт** (`POST /me/subscribed_apps`) на поля
+- **`setWebhook()` подписывает аккаунт** (`POST /{accountId}/subscribed_apps`) на поля
   `UPDATE_TYPES`, адрес не передаётся. `deleteWebhook($url)` отступает от общего контракта:
   `$url` игнорируется, аккаунт отписывается целиком (подписка одна на аккаунт). Поэтому его
   нельзя вызывать из polling- и dev-окружений, разделяющих приложение Meta с боевым.
-  Идентификатор для маршрутизации – `user_id` из `/me` (`getMe()['account_id']`), а не `id`.
+  Идентификатор для маршрутизации – `Config::accountId` (= `getMe()['account_id']` = `entry.id`).
 - **Текст** – до 1000 байт UTF-8, а не единиц UTF-16; пустой текст – `InvalidArgumentException`
   до запроса. Ответ под комментарием (`replyToComment`) – до 2200 символов
   (`COMMENT_MAX_CHARS`, единицы UTF-16, как в `Text`). Рядов кнопок нет: до 3 кнопок –
@@ -247,13 +254,14 @@ Instagram API with Instagram Login (`graph.instagram.com`), версия Graph A
   при пустом тексте и отказ медиа при пустом тексте – `InvalidArgumentException` без
   отправки: пустого сообщения Instagram не принимает.
 - **Нет** `editMessage`, `setCommands`, `getUpdates`, `sendFileId` (многоразовые
-  attachment_id выдаёт только API страниц Facebook) – `ApiException` `unsupported`.
+  attachment_id не поддерживаются) – `ApiException` `unsupported`.
   Команд и `/start` нет.
 - **Ошибки** – по `code`/`error_subcode`, текст Meta наружу не выходит. Новые причины:
   `window_closed` (вне окна 24 часа), `reply_unavailable` (комментарий не годится для
   private reply), `consent_required` (профиль без согласия собеседника),
-  `unsupported`; существующая `invalid_token` у Instagram означает и код 190 (Meta отозвала
-  или просрочила токен). Задержка throttling – не меньше 60 секунд: лимиты Meta
+  `messaging_disabled` (владелец не включил «Доступ к сообщениям» в настройках Instagram),
+  `unsupported`; существующая `invalid_token` у Instagram означает и код 190 (интеграцию
+  удалили или Meta отозвала токен). Задержка throttling – не меньше 60 секунд: лимиты Meta
   считаются окнами в часы.
 
 ## 7. Версионирование
