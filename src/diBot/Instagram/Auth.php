@@ -235,7 +235,7 @@ final class Auth
     // Как в BotApi: явный адрес Graph – не прокси, секрет прокси в Meta не уходит.
     private function proxied(): bool
     {
-        return $this->baseUrl !== '' && rtrim($this->baseUrl, '/') !== self::GRAPH_BASE_URL;
+        return $this->baseUrl !== '' && strcasecmp(rtrim($this->baseUrl, '/'), self::GRAPH_BASE_URL) !== 0;
     }
 
     // Коды Graph API: 10 и 200–299 – отказ в разрешении.

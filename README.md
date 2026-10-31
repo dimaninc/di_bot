@@ -436,8 +436,8 @@ Attachment URLs are signed CDN links: download them promptly with
 
 `getMe()` sends GET `/{accountId}?fields=id,username` and returns
 `['account_id' => …, 'username' => …]` as Meta returns them (not compared with
-`Config::accountId`); `account_id` is the webhook `entry_id`. `setWebhook($url)` ignores `$url` and subscribes the account to
-`UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
+`Config::accountId`); `account_id` is the webhook `entry_id`. `setWebhook($url)` ignores
+`$url` and subscribes the account to `UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
 POST `/{accountId}/subscribed_apps`; `deleteWebhook()` sends DELETE
 `/{accountId}/subscribed_apps`. Unlike other platforms, `deleteWebhook($url)` ignores
 `$url` and unsubscribes the whole account (the subscription is per account): never call
@@ -462,7 +462,9 @@ foreach ($auth->accounts($token->accessToken) as $account) {
 The code exchange gives a BISU token: `Token` has `accessToken` and `expiresIn` (`0` – it
 never expires; there is nothing to refresh). It stops working when the client removes the
 integration or Meta revokes it (`invalid_token`): then a new login is needed. `var_dump`
-redacts the token.
+redacts the token. The Login configuration must issue a system-user token: `expiresIn > 0`
+means a user-token configuration, where `/me` is a person and the library cannot refresh
+the token.
 
 `accounts()` lists the Instagram accounts the client granted. It reads
 `/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages).

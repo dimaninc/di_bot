@@ -239,6 +239,9 @@ final class InstagramAuthTest extends TestCase
         self::assertSame('https://graph.facebook.com/v26.0/me/permissions', $http->requests[0]->url);
         self::assertSame(['Authorization: Bearer ' . self::TOKEN], $http->requests[0]->headers);
         self::auth(new FakeClient([]), 'https://graph.facebook.com');
+        $http = new FakeClient([FakeClient::json(['data' => []])]);
+        self::auth($http, 'https://Graph.Facebook.com', 'px')->permissions(self::TOKEN);
+        self::assertSame(['Authorization: Bearer ' . self::TOKEN], $http->requests[0]->headers);
     }
 
     public function testSecretsNeverReachExceptions(): void

@@ -392,7 +392,8 @@ class BotApi extends AbstractBotApi
             'Authorization: Bearer ' . $this->config->token,
             'Content-Type: application/json',
         ];
-        if ($base !== self::DEFAULT_BASE_URL) {
+        // Хост без учёта регистра: иначе секрет прокси ушёл бы в саму Meta.
+        if (strcasecmp($base, self::DEFAULT_BASE_URL) !== 0) {
             if ($this->config->proxySecret === '') {
                 throw new \InvalidArgumentException('Instagram proxy requires a secret');
             }

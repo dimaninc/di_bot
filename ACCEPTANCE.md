@@ -89,11 +89,16 @@ TLS проверен системным набором CA, IP соединени
   не работает.
 - [x] `GET /me?fields=id,client_business_id` с токеном BISU отдаёт id портфолио клиента
   (31.10.2026).
-- [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте, а
-  `owned_instagram_accounts` требует `business_management`: проверить поиск аккаунта с
-  этим разрешением в конфигурации входа – и шире ли этот список выданного при входе.
+- [x] Без `business_management` `/{client_business_id}/owned_instagram_accounts` отвечает
+  кодом 200: «(#200) Requires business_management permission to manage the object»
+  (31.10.2026) – это и есть «не найдено» запасного пути.
+- [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте: проверить поиск
+  аккаунта с `business_management` в конфигурации входа – и шире ли этот список выданного
+  при входе.
 - [x] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека):
-  `/me`, `assigned_instagram_accounts`, `media`, `messages` – проверено 31.10.2026.
+  `/me`, `/me/permissions` (только granted, 31.10.2026: `instagram_basic`,
+  `instagram_manage_comments`, `instagram_manage_messages`, `instagram_content_publish`,
+  `public_profile`), `assigned_instagram_accounts`, `media`, `messages` – проверено 31.10.2026.
 - [ ] Обмен кода через Worker (`<baseUrl>/v26.0/oauth/access_token` →
   `graph.facebook.com`).
 
