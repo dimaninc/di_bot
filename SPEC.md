@@ -241,7 +241,8 @@ Instagram API with Facebook Login for Business (`graph.facebook.com`), верс�
   `UPDATE_TYPES`, адрес не передаётся. `deleteWebhook($url)` отступает от общего контракта:
   `$url` игнорируется, аккаунт отписывается целиком (подписка одна на аккаунт). Поэтому его
   нельзя вызывать из polling- и dev-окружений, разделяющих приложение Meta с боевым.
-  Идентификатор для маршрутизации – `Config::accountId` (= `getMe()['account_id']` = `entry.id`).
+  Идентификатор для маршрутизации – `Config::accountId` (= `getMe()['account_id']`; равенство
+  `entry.id` ожидается, живьём не проверено – см. ACCEPTANCE).
 - **Текст** – до 1000 байт UTF-8, а не единиц UTF-16; пустой текст – `InvalidArgumentException`
   до запроса. Ответ под комментарием (`replyToComment`) – до 2200 символов
   (`COMMENT_MAX_CHARS`, единицы UTF-16, как в `Text`). Рядов кнопок нет: до 3 кнопок –

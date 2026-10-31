@@ -239,7 +239,7 @@ final class InstagramAuthTest extends TestCase
         self::assertSame('https://graph.facebook.com/v26.0/me/permissions', $http->requests[0]->url);
         self::assertSame(['Authorization: Bearer ' . self::TOKEN], $http->requests[0]->headers);
         self::auth(new FakeClient([]), 'https://graph.facebook.com');
-        foreach (['https://Graph.Facebook.com', 'https://graph.facebook.com:443', 'https://graph.facebook.com/v26.0'] as $graph) {
+        foreach (['https://Graph.Facebook.com', 'https://graph.facebook.com:443', 'https://graph.facebook.com/v26.0', 'https://graph.facebook.com.'] as $graph) {
             $http = new FakeClient([FakeClient::json(['data' => []])]);
             self::auth($http, $graph, 'px')->permissions(self::TOKEN);
             self::assertSame('https://graph.facebook.com/v26.0/me/permissions', $http->requests[0]->url, $graph);

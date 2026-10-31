@@ -235,8 +235,10 @@ final class Auth
     /** Прокси – непустой адрес с хостом не Graph; общее правило Auth и BotApi. */
     public static function isProxy(string $baseUrl): bool
     {
+        // Точка на конце (FQDN) резолвится в тот же хост.
+        $host = rtrim((string) parse_url($baseUrl, PHP_URL_HOST), '.');
         return $baseUrl !== '' &&
-            strcasecmp((string) parse_url($baseUrl, PHP_URL_HOST), 'graph.facebook.com') !== 0;
+            strcasecmp($host, (string) parse_url(self::GRAPH_BASE_URL, PHP_URL_HOST)) !== 0;
     }
 
     private function proxied(): bool

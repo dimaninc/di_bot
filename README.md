@@ -436,7 +436,8 @@ Attachment URLs are signed CDN links: download them promptly with
 
 `getMe()` sends GET `/{accountId}?fields=id,username` and returns
 `['account_id' => …, 'username' => …]` as Meta returns them (not compared with
-`Config::accountId`); `account_id` is the webhook `entry_id`. `setWebhook($url)` ignores
+`Config::accountId`); `account_id` is expected to equal the webhook `entry_id` (not yet
+verified live, see ACCEPTANCE). `setWebhook($url)` ignores
 `$url` and subscribes the account to `UPDATE_TYPES` (`comments`, `messages`,
 `messaging_postbacks` – the set verified live; `live_comments` is not subscribed, since on
 Standard Access it may fail the whole subscription, but such events are parsed if they
@@ -464,9 +465,10 @@ foreach ($auth->accounts($token->accessToken) as $account) {
 The code exchange gives a BISU token: `Token` has `accessToken` and `expiresIn` (`0` – it
 never expires; there is nothing to refresh). It stops working when the client removes the
 integration or Meta revokes it (`invalid_token`): then a new login is needed. `var_dump`
-redacts the token. The Login configuration must issue a system-user token: `expiresIn > 0`
-means a user-token configuration, where `/me` is a person and the library cannot refresh
-the token.
+redacts the token. Use a Login configuration that issues a never-expiring system-user
+token. `expiresIn > 0` is passed through as is: either the configuration sets a token
+expiry (a system-user option) or it issues a user token, where `/me` is a person. The
+library refreshes neither; the application decides whether to accept such a token.
 
 `accounts()` lists the Instagram accounts the client granted. It reads
 `/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages;

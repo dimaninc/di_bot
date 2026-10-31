@@ -64,7 +64,7 @@ final class InstagramApiTest extends TestCase
         self::assertSame('https://ig-api.example/v26.0/17841400000000001/messages', $http->requests[0]->url);
         self::assertContains('X-Proxy-Auth: proxy-secret', $http->requests[0]->headers);
         // Адрес Graph в любой записи – не прокси: секрет в Meta не уходит, путь не удваивается.
-        foreach (['https://Graph.Facebook.com', 'https://graph.facebook.com:443', 'https://graph.facebook.com/v26.0'] as $graph) {
+        foreach (['https://Graph.Facebook.com', 'https://graph.facebook.com:443', 'https://graph.facebook.com/v26.0', 'https://graph.facebook.com.:443'] as $graph) {
             [$api, $http] = $this->api([self::sent()], $graph, 'proxy-secret');
             $api->sendMessage('5', 'x');
             self::assertSame('https://graph.facebook.com/v26.0/17841400000000001/messages', $http->requests[0]->url, $graph);

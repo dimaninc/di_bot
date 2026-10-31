@@ -90,7 +90,7 @@ TLS проверен системным набором CA, IP соединени
 - [x] `GET /me?fields=id,client_business_id` с токеном BISU отдаёт id портфолио клиента
   (31.10.2026).
 - [x] Без `business_management` `/{client_business_id}/owned_instagram_accounts` отвечает
-  кодом 200: «(#200) Requires business_management permission to manage the object»
+  ошибкой с `error.code` 200 (не HTTP 200): «(#200) Requires business_management permission to manage the object»
   (31.10.2026) – это и есть «не найдено» запасного пути.
 - [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте: проверить поиск
   аккаунта с `business_management` в конфигурации входа – и шире ли этот список выданного
