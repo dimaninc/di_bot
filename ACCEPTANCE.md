@@ -90,8 +90,8 @@ TLS проверен системным набором CA, IP соединени
 - [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте, а
   `owned_instagram_accounts` требует `business_management`: проверить поиск аккаунта с
   этим разрешением в конфигурации входа.
-- [ ] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека);
-  живая проверка шла с токеном в query.
+- [x] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека):
+  `/me`, `assigned_instagram_accounts`, `media`, `messages` – проверено 31.10.2026.
 - [ ] Обмен кода через Worker (`<baseUrl>/v26.0/oauth/access_token` →
   `graph.facebook.com`).
 
