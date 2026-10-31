@@ -7,12 +7,12 @@ use diBot\Http\Request;
 use diBot\Outgoing\{Media, Transport};
 
 /**
- * Instagram API with Instagram Login. Config::token – долгоживущий токен пользователя
- * Instagram (обновление – на стороне приложения, см. Auth). Вебхук – Webhook, не контроллер.
+ * Instagram API with Facebook Login for Business. Config::token – токен BISU из Auth,
+ * Config::accountId – IG user id аккаунта. Вебхук – Webhook, не контроллер.
  */
 class BotApi extends AbstractBotApi
 {
-    public const DEFAULT_BASE_URL = 'https://graph.instagram.com';
+    public const DEFAULT_BASE_URL = 'https://graph.facebook.com';
     public const GRAPH_VERSION = 'v26.0';
     // Текст меряется в байтах UTF-8 (≈500 символов кириллицы); единицы – для общих проверок.
     public const TEXT_MAX_BYTES = 1000;
@@ -41,18 +41,14 @@ class BotApi extends AbstractBotApi
         return Platform::Instagram;
     }
 
-    /**
-     * ['account_id' => user_id – совпадает с entry.id вебхука, 'username',
-     *  'app_scoped_id' => id – app-scoped ID, для маршрутизации не годится].
-     */
+    /** ['account_id' => IG user id – совпадает с entry.id вебхука, 'username']. */
     public function getMe(): array
     {
-        $data = self::unwrap($this->request('GET', '/me', ['fields' => 'user_id,username,id']));
+        $data = $this->request('GET', $this->account(), ['fields' => 'id,username']);
         $string = static fn(mixed $v): string => is_string($v) || is_int($v) ? (string) $v : '';
         $result = [
-            'account_id' => $string($data['user_id'] ?? ''),
+            'account_id' => $string($data['id'] ?? ''),
             'username' => $string($data['username'] ?? ''),
-            'app_scoped_id' => $string($data['id'] ?? ''),
         ];
         if ($result['account_id'] === '') {
             throw new ApiException(200, 'invalid_me');
@@ -101,7 +97,7 @@ class BotApi extends AbstractBotApi
     public function getMedia(?string $after = null, int $limit = 25): Page
     {
         return $this->page(
-            '/me/media',
+            $this->account() . '/media',
             'id,caption,media_type,permalink,media_url,thumbnail_url,timestamp',
             $after,
             $limit,
@@ -172,7 +168,7 @@ class BotApi extends AbstractBotApi
         return $this->messages(['id' => self::id($chatId)], $message);
     }
 
-    // Многоразовые attachment_id выдаёт только API страниц Facebook, не Instagram Login.
+    // Многоразовые attachment_id для Instagram не поддерживаются.
     public function sendFileId(
         string $chatId,
         string $kind,
@@ -216,7 +212,7 @@ class BotApi extends AbstractBotApi
     public function setWebhook(string $url): array
     {
         return self::succeeded(
-            $this->request('POST', '/me/subscribed_apps', [
+            $this->request('POST', $this->account() . '/subscribed_apps', [
                 'subscribed_fields' => implode(',', self::UPDATE_TYPES),
             ])
         );
@@ -228,7 +224,7 @@ class BotApi extends AbstractBotApi
      */
     public function deleteWebhook(?string $url = null): void
     {
-        self::succeeded($this->request('DELETE', '/me/subscribed_apps'));
+        self::succeeded($this->request('DELETE', $this->account() . '/subscribed_apps'));
     }
 
     /** 200 с {"success": false} – подписка не изменилась, а не успех. */
@@ -311,7 +307,7 @@ class BotApi extends AbstractBotApi
 
     private function messages(array $recipient, #[\SensitiveParameter] array $message): array
     {
-        return $this->request('POST', '/me/messages', body: [
+        return $this->request('POST', $this->account() . '/messages', body: [
             'recipient' => $recipient,
             'message' => $message,
         ]);
@@ -360,10 +356,13 @@ class BotApi extends AbstractBotApi
         );
     }
 
-    /** Вызов с обёрткой data[] (так показаны примеры справочника) и без неё. */
-    private static function unwrap(array $data): array
+    // С этим токеном /me – системный пользователь, а не аккаунт: путь всегда от IG user id.
+    private function account(): string
     {
-        return is_array($data['data'][0] ?? null) ? $data['data'][0] : $data;
+        if (!preg_match('/^[0-9]{1,32}$/D', $this->config->accountId)) {
+            throw new \InvalidArgumentException('Instagram requires a numeric Config::accountId');
+        }
+        return '/' . $this->config->accountId;
     }
 
     /** Идентификаторы Instagram числовые; иное не должно попасть в путь запроса. */

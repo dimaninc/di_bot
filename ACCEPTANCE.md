@@ -75,33 +75,40 @@ TLS проверен системным набором CA, IP соединени
 
 Нужны тестовое Meta-приложение, Professional-аккаунт и второй аккаунт-собеседник.
 Факты ниже взяты из справочника Meta (29.10.2026) или не подтверждены им; до проверки
-это допущения адаптера, а не гарантии.
+это допущения адаптера, а не гарантии. Отмеченное проверено живьём 31.10.2026.
 
 Сеть и доступ:
 
-- [ ] Запрос к `graph.instagram.com` через Worker отвечает API Meta, а не ошибкой
+- [ ] Запрос к `graph.facebook.com` через Worker отвечает API Meta, а не ошибкой
   доступа; прямой доступ с боевого сервера – для справки.
 - [ ] Хватает ли Standard Access для собственного аккаунта; для `comments` и
   `live_comments` справочник требует Advanced Access и приложение в режиме Live.
-- [ ] Обмен кода через Worker (`/oauth/access_token` → `api.instagram.com`): форма
-  `application/x-www-form-urlencoded` принимается (в справочнике пример multipart), ответ
-  плоский или в `data[]` – разбираются оба.
-- [ ] `/access_token` и `/refresh_access_token` работают без версии в пути; принимают ли
-  они токен заголовком вместо query – не проверено, сейчас секреты идут в query, как в
-  справочнике.
+- [x] Facebook Login for Business (31.10.2026, v26.0): вход по `config_id`, обмен кода
+  `GET /oauth/access_token` даёт токен BISU без `expires_in`; `/me` – системный
+  пользователь, вызовы аккаунта – `/{ig-user-id}/…`; `graph.instagram.com` с этим токеном
+  не работает.
+- [x] `GET /me?fields=id,client_business_id` с токеном BISU отдаёт id портфолио клиента
+  (31.10.2026).
+- [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте, а
+  `owned_instagram_accounts` требует `business_management`: проверить поиск аккаунта с
+  этим разрешением в конфигурации входа – и шире ли этот список выданного при входе.
+- [x] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека):
+  `/me`, `assigned_instagram_accounts`, `media`, `messages` – проверено 31.10.2026.
+- [ ] Обмен кода через Worker (`<baseUrl>/v26.0/oauth/access_token` →
+  `graph.facebook.com`).
 
 Вебхук:
 
-- [ ] Каким секретом подписан `X-Hub-Signature-256`: App Secret из «Настройки → Основное»
-  или Instagram app secret из настроек Business Login. Справочник называет App Secret,
-  но для Instagram Login это не подтверждено. Проверить кнопкой «Test» и живым сообщением.
-- [ ] Форма живых событий совпадает с примерами: `entry.id` = `user_id` из `/me`,
-  `messaging[]` для лички, `changes[]` для комментариев; у комментария нет `parent_id` в
-  примере Instagram Login – проверить ответ под комментарием. Тестовая отправка из панели
-  может приходить в `changes` с полем `messages` – такие события адаптер пропускает.
-- [ ] `setWebhook()` (`POST /me/subscribed_apps`) включает доставку; `DELETE
-  /me/subscribed_apps` в справочнике Instagram Login не описан – проверить, что он
-  отписывает аккаунт и что повтор не ошибка.
+- [ ] Каким секретом подписан `X-Hub-Signature-256` – ожидается App Secret из
+  «Настройки → Основное». Проверить кнопкой «Test» и живым сообщением.
+- [ ] Форма живых событий совпадает с примерами: `entry.id` = IG user id
+  (`Config::accountId`), `messaging[]` для лички, `changes[]` для комментариев; проверить
+  `parent_id` у ответа под комментарием. Тестовая отправка из панели может приходить в
+  `changes` с полем `messages` – такие события адаптер пропускает.
+- [x] `setWebhook()` (`POST /{ig-user-id}/subscribed_apps`) отвечает `{"success":true}`
+  (31.10.2026, поля `comments,messages,messaging_postbacks`).
+- [ ] `DELETE /{ig-user-id}/subscribed_apps` отписывает аккаунт, повтор не ошибка;
+  подписка на `live_comments` принимается.
 - [ ] Единицы `entry.time` у событий `changes` (комментарии): секунды или миллисекунды.
 - [ ] `from.id` ответа самого бизнес-аккаунта под постом равен `entry.id` (на этом
   держится отсев своих комментариев).
@@ -110,8 +117,11 @@ TLS проверен системным набором CA, IP соединени
 
 Отправка:
 
-- [ ] Private reply с quick replies и с шаблоном button: в справочнике пример только с
-  текстом.
+- [x] Личка (текст, quick replies, шаблон button) и private reply с шаблоном button через
+  `POST /{ig-user-id}/messages`, публичный ответ `POST /{comment}/replies` (31.10.2026).
+- [x] Ошибка «account owner has disabled access to Instagram Direct Messaging…» – код 200
+  (и у `/messages`, и у профиля – там текст «…instagram direct messages»), даёт
+  `messaging_disabled`; после включения «Доступа к сообщениям» отправка проходит (31.10.2026).
 - [ ] Private reply на комментарий, найденный через `getComments()`, а не пришедший
   вебхуком.
 - [ ] Повторный private reply и ответ на комментарий старше 7 дней: зафиксировать
@@ -127,8 +137,6 @@ TLS проверен системным набором CA, IP соединени
   опубликован.
 - [ ] Отправка фото и PDF по URL с публичного хоста приложения (Meta скачивает файл из-за
   рубежа); форма `attachments: [...]` для картинки и `attachment` для файла.
-- [ ] `getMedia()` возвращает `caption`: справочник помечает поле «только Facebook Login»;
-  если Meta ответит ошибкой несуществующего поля – убрать его из запроса.
 - [ ] Пагинация `getMedia()`/`getComments()` курсором `after`, максимум `limit` (50 у
   комментариев документирован, 100 у медиа – политика библиотеки).
 - [ ] Throttling: код и заголовок `X-Business-Use-Case-Usage` при естественном
@@ -144,7 +152,6 @@ TLS проверен системным набором CA, IP соединени
 
 - [Instagram: Messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api)
 - [Instagram: вебхуки](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup)
-- [Instagram: Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login)
 - [Messenger Platform: коды ошибок](https://developers.facebook.com/docs/messenger-platform/error-codes)
 - [MAX: регистрация подписки и секрет](https://dev.max.ru/docs-api/methods/POST/subscriptions)
 - [MAX: редактирование сообщения](https://dev.max.ru/docs-api/methods/PUT/messages)

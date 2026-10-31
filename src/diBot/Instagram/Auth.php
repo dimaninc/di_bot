@@ -6,23 +6,25 @@ use diBot\Exception\ApiException;
 use diBot\Http\{Client, CurlClient, Request};
 
 /**
- * Business Login for Instagram: ссылка входа, обмен кода, долгоживущий токен и его
- * обновление. Хранение токена и график обновления – дело приложения.
+ * Facebook Login for Business (Unified Login): ссылка входа по конфигурации, обмен кода на
+ * бессрочный токен BISU и чтение выданного доступа. Хранение токена – дело приложения.
  *
- * С $baseUrl (прокси) все вызовы идут на него: обмен кода – <baseUrl>/oauth/access_token
- * (прокси шлёт его на api.instagram.com), остальное – по обычным путям graph.instagram.com.
+ * С $baseUrl (прокси) все вызовы Graph идут на <baseUrl>/v26.0/… с X-Proxy-Auth.
  */
 final class Auth
 {
-    public const AUTHORIZE_URL = 'https://www.instagram.com/oauth/authorize';
-    public const CODE_BASE_URL = 'https://api.instagram.com';
-    public const GRAPH_BASE_URL = 'https://graph.instagram.com';
+    public const AUTHORIZE_URL = 'https://www.facebook.com/' . BotApi::GRAPH_VERSION . '/dialog/oauth';
+    public const GRAPH_BASE_URL = 'https://graph.facebook.com';
+    public const ACCOUNTS_PAGE_LIMIT = 100;
+    // Клиент выдаёт доступ к считанным аккаунтам: больше 500 – скорее зацикленный курсор.
+    public const ACCOUNTS_MAX_PAGES = 5;
 
     private Client $http;
 
     public function __construct(
         private readonly string $appId,
         #[\SensitiveParameter] private readonly string $appSecret,
+        private readonly string $configId,
         private readonly string $redirectUri,
         ?Client $http = null,
         private readonly string $baseUrl = '',
@@ -31,6 +33,9 @@ final class Auth
     ) {
         if (!preg_match('/^[0-9]{1,32}$/D', $appId) || $appSecret === '') {
             throw new \InvalidArgumentException('Invalid Instagram app credentials');
+        }
+        if (!preg_match('/^[0-9]{1,32}$/D', $configId)) {
+            throw new \InvalidArgumentException('Invalid Facebook Login configuration ID');
         }
         // 0 у cURL – «без таймаута».
         if ($timeout < 1) {
@@ -56,153 +61,187 @@ final class Auth
         $this->http = $http ?? new CurlClient();
     }
 
-    /** @param list<string> $scopes например instagram_business_basic, …_manage_messages */
-    public function authorizeUrl(string $state, array $scopes): string
+    /** Разрешения задаёт конфигурация входа, scope не передаётся; $relogin – prompt=login. */
+    public function authorizeUrl(string $state, bool $relogin = false): string
     {
-        if ($state === '' || $scopes === []) {
-            throw new \InvalidArgumentException('State and scopes are required');
+        if ($state === '') {
+            throw new \InvalidArgumentException('State is required');
         }
-        foreach ($scopes as $scope) {
-            if (!is_string($scope) || !preg_match('/^[a-z_]{1,64}$/D', $scope)) {
-                throw new \InvalidArgumentException('Invalid scope');
-            }
+        $query = [
+            'client_id' => $this->appId,
+            'config_id' => $this->configId,
+            'redirect_uri' => $this->redirectUri,
+            'response_type' => 'code',
+            'override_default_response_type' => 'true',
+            'state' => $state,
+        ];
+        if ($relogin) {
+            $query['prompt'] = 'login';
         }
-        return self::AUTHORIZE_URL .
-            '?' .
-            http_build_query(
-                [
-                    'client_id' => $this->appId,
-                    'redirect_uri' => $this->redirectUri,
-                    'response_type' => 'code',
-                    'scope' => implode(',', $scopes),
-                    'state' => $state,
-                ],
-                '',
-                '&',
-                PHP_QUERY_RFC3986
-            );
+        return self::AUTHORIZE_URL . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
     }
 
-    /** Короткоживущий (1 час) токен и user_id; код одноразовый, живёт час. */
+    /** Бессрочный токен BISU; код одноразовый. */
     public function exchangeCode(#[\SensitiveParameter] string $code): Token
     {
-        // Meta дописывает к адресу возврата «#_», это не часть кода.
-        $code = preg_replace('/#_?$/D', '', $code);
+        // Facebook дописывает к адресу возврата фрагмент «#_=_», это не часть кода.
+        $code = preg_replace('/#.*$/sD', '', $code);
         if ($code === '') {
             throw new \InvalidArgumentException('Empty authorization code');
         }
-        $body = http_build_query(
-            [
-                'client_id' => $this->appId,
-                'client_secret' => $this->appSecret,
-                'grant_type' => 'authorization_code',
-                'redirect_uri' => $this->redirectUri,
-                'code' => $code,
-            ],
-            '',
-            '&',
-            PHP_QUERY_RFC3986
-        );
-        $data = $this->call(
-            'POST',
-            ($this->baseUrl !== '' ? rtrim($this->baseUrl, '/') : self::CODE_BASE_URL) .
-                '/oauth/access_token',
-            $body
-        );
-        // В справочнике ответ обёрнут в data[], на практике бывает плоским.
-        if (is_array($data['data'][0] ?? null)) {
-            $data = $data['data'][0];
-        }
-        $permissions = $data['permissions'] ?? [];
-        if (is_string($permissions)) {
-            $permissions = $permissions === '' ? [] : explode(',', $permissions);
-        }
-        $userId = $data['user_id'] ?? null;
-        return $this->token(
-            $data,
-            is_string($userId) || is_int($userId) ? (string) $userId : '',
-            is_array($permissions) ? array_values(array_filter($permissions, 'is_string')) : []
-        );
-    }
-
-    /** Долгоживущий токен (60 дней) в обмен на короткоживущий. */
-    public function longLived(#[\SensitiveParameter] string $shortToken): Token
-    {
-        return $this->token(
-            $this->graph('/access_token', [
-                'grant_type' => 'ig_exchange_token',
-                'client_secret' => $this->appSecret,
-                'access_token' => $shortToken,
-            ])
-        );
-    }
-
-    /** Новый токен на 60 дней; старому должно быть не меньше суток, и он не истёк. */
-    public function refresh(#[\SensitiveParameter] string $longToken): Token
-    {
-        return $this->token(
-            $this->graph('/refresh_access_token', [
-                'grant_type' => 'ig_refresh_token',
-                'access_token' => $longToken,
-            ])
-        );
-    }
-
-    public function __debugInfo(): array
-    {
-        return ['appId' => $this->appId, 'appSecret' => '[redacted]'];
-    }
-
-    /**
-     * Справочник принимает эти параметры только в query (GET), и секреты попадают в URL.
-     * Поэтому URL не логируется нигде, а ошибки клиента очищаются до безопасной причины.
-     */
-    private function graph(string $path, #[\SensitiveParameter] array $query): array
-    {
-        return $this->call(
-            'GET',
-            ($this->baseUrl !== '' ? rtrim($this->baseUrl, '/') : self::GRAPH_BASE_URL) .
-                $path .
-                '?' .
-                http_build_query($query, '', '&', PHP_QUERY_RFC3986)
-        );
-    }
-
-    private function token(array $data, string $userId = '', array $permissions = []): Token
-    {
+        $data = $this->graph('/oauth/access_token', [
+            'client_id' => $this->appId,
+            'client_secret' => $this->appSecret,
+            'redirect_uri' => $this->redirectUri,
+            'code' => $code,
+        ]);
         $token = $data['access_token'] ?? null;
         if (!is_string($token) || $token === '') {
             throw new ApiException(200, 'invalid_token_response');
         }
         $expires = $data['expires_in'] ?? 0;
-        return new Token(
-            $token,
-            $userId,
-            is_int($expires) && $expires > 0 ? $expires : 0,
-            $permissions
-        );
+        return new Token($token, is_int($expires) && $expires > 0 ? $expires : 0);
     }
 
-    private function call(
-        string $method,
-        #[\SensitiveParameter] string $url,
-        #[\SensitiveParameter] ?string $body = null
+    /** Бизнес-портфолио клиента (client_business_id из /me); '' – Meta его не вернула. */
+    public function clientBusinessId(#[\SensitiveParameter] string $token): string
+    {
+        $data = $this->graph('/me', ['fields' => 'id,client_business_id'], $token);
+        $id = $data['client_business_id'] ?? '';
+        return (is_string($id) || is_int($id)) && preg_match('/^[0-9]{1,32}$/D', (string) $id)
+            ? (string) $id
+            : '';
+    }
+
+    /** @return list<string> только разрешения со статусом granted */
+    public function permissions(#[\SensitiveParameter] string $token): array
+    {
+        $data = $this->graph('/me/permissions', [], $token);
+        $granted = [];
+        foreach (is_array($data['data'] ?? null) ? $data['data'] : [] as $item) {
+            if (
+                is_array($item) &&
+                ($item['status'] ?? null) === 'granted' &&
+                is_string($item['permission'] ?? null)
+            ) {
+                $granted[] = $item['permission'];
+            }
+        }
+        return $granted;
+    }
+
+    /**
+     * Аккаунты Instagram из выданного доступа. assigned_instagram_accounts бывает пустым и при
+     * выданном аккаунте – тогда owned_instagram_accounts бизнеса клиента; отказ в правах на
+     * нём (нужен business_management) – «не найдено», а не ошибка. Этот запасной список –
+     * все аккаунты портфолио, он может быть шире выданного при входе.
+     * @return list<Account>
+     */
+    public function accounts(#[\SensitiveParameter] string $token): array
+    {
+        $accounts = $this->accountList('/me/assigned_instagram_accounts', $token);
+        if ($accounts !== []) {
+            return $accounts;
+        }
+        $businessId = $this->clientBusinessId($token);
+        return $businessId === ''
+            ? []
+            : $this->accountList('/' . $businessId . '/owned_instagram_accounts', $token, true);
+    }
+
+    public function __debugInfo(): array
+    {
+        return ['appId' => $this->appId, 'configId' => $this->configId, 'appSecret' => '[redacted]'];
+    }
+
+    /** @return list<Account> */
+    private function accountList(
+        string $path,
+        #[\SensitiveParameter] string $token,
+        bool $deniedIsEmpty = false
     ): array {
-        $headers = $body === null ? [] : ['Content-Type: application/x-www-form-urlencoded'];
+        $accounts = [];
+        $after = null;
+        for ($page = 0; $page < self::ACCOUNTS_MAX_PAGES; $page++) {
+            $query = ['fields' => 'id,username', 'limit' => self::ACCOUNTS_PAGE_LIMIT];
+            if ($after !== null) {
+                $query['after'] = $after;
+            }
+            $data = $this->graph($path, $query, $token, $deniedIsEmpty);
+            if ($data === null) {
+                break;
+            }
+            if (!is_array($data['data'] ?? null)) {
+                throw new ApiException(200, 'invalid_page');
+            }
+            foreach ($data['data'] as $raw) {
+                $account = is_array($raw) ? Account::fromArray($raw) : null;
+                if ($account !== null) {
+                    $accounts[$account->id] = $account;
+                }
+            }
+            // Курсор after бывает и на последней странице: признак продолжения – paging.next.
+            $paging = is_array($data['paging'] ?? null) ? $data['paging'] : [];
+            $next = $paging['cursors']['after'] ?? null;
+            if (!isset($paging['next']) || !is_string($next) || $next === '') {
+                break;
+            }
+            $after = $next;
+        }
+        return array_values($accounts);
+    }
+
+    /**
+     * Обмен кода принимает секрет приложения только в query (GET): URL не логируется нигде,
+     * ошибки клиента очищаются до безопасной причины. Токен доступа идёт заголовком.
+     * null – отказ в правах при $deniedIsEmpty.
+     */
+    private function graph(
+        string $path,
+        #[\SensitiveParameter] array $query,
+        #[\SensitiveParameter] string $token = '',
+        bool $deniedIsEmpty = false
+    ): ?array {
+        $headers = [];
+        if ($token !== '') {
+            // Перевод строки или пробел в токене – подмена заголовков.
+            if (!preg_match('/^[A-Za-z0-9._|-]+$/D', $token)) {
+                throw new ApiException(0, 'invalid_token');
+            }
+            $headers[] = 'Authorization: Bearer ' . $token;
+        }
         if ($this->baseUrl !== '') {
             $headers[] = 'X-Proxy-Auth: ' . $this->proxySecret;
         }
+        $url =
+            ($this->baseUrl !== '' ? rtrim($this->baseUrl, '/') : self::GRAPH_BASE_URL) .
+            '/' .
+            BotApi::GRAPH_VERSION .
+            $path .
+            ($query ? '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986) : '');
         try {
-            $response = $this->http->send(
-                new Request($method, $url, $headers, $body, $this->timeout)
-            );
+            $response = $this->http->send(new Request('GET', $url, $headers, null, $this->timeout));
         } catch (\Throwable $e) {
             throw ApiException::fromTransport($e);
+        }
+        if ($deniedIsEmpty && self::isPermissionError($response)) {
+            return null;
         }
         $error = Errors::classify($response);
         if ($error !== null) {
             throw $error;
         }
         return $response->json();
+    }
+
+    // Коды Graph API: 10 и 200–299 – отказ в разрешении.
+    private static function isPermissionError(\diBot\Http\Response $response): bool
+    {
+        try {
+            $code = $response->json()['error']['code'] ?? null;
+        } catch (ApiException) {
+            return false;
+        }
+        return $code === 10 || (is_int($code) && $code >= 200 && $code <= 299);
     }
 }
