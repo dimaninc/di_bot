@@ -437,8 +437,10 @@ Attachment URLs are signed CDN links: download them promptly with
 `getMe()` sends GET `/{accountId}?fields=id,username` and returns
 `['account_id' => …, 'username' => …]` as Meta returns them (not compared with
 `Config::accountId`); `account_id` is the webhook `entry_id`. `setWebhook($url)` ignores
-`$url` and subscribes the account to `UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
-POST `/{accountId}/subscribed_apps`; `deleteWebhook()` sends DELETE
+`$url` and subscribes the account to `UPDATE_TYPES` (`comments`, `messages`,
+`messaging_postbacks` – the set verified live; `live_comments` is not subscribed, since on
+Standard Access it may fail the whole subscription, but such events are parsed if they
+arrive) with POST `/{accountId}/subscribed_apps`; `deleteWebhook()` sends DELETE
 `/{accountId}/subscribed_apps`. Unlike other platforms, `deleteWebhook($url)` ignores
 `$url` and unsubscribes the whole account (the subscription is per account): never call
 it from polling or dev setups that share the Meta app, or production stops receiving
@@ -467,12 +469,13 @@ means a user-token configuration, where `/me` is a person and the library cannot
 the token.
 
 `accounts()` lists the Instagram accounts the client granted. It reads
-`/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages).
+`/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages;
+a longer list is truncated silently – more is most likely a looping cursor).
 That list can be empty even when an account was granted, so the fallback is
 `/{client_business_id}/owned_instagram_accounts`; it needs `business_management` in the
 configuration, and a permission error on its first page (codes 10, 200–299) means "nothing
-found", not a failure; on a later page it is an error. Neither path is verified live yet
-(ACCEPTANCE.md). The fallback presumably lists every account the client's portfolio owns,
+found", not a failure; on a later page it is an error. Neither path has yet returned the
+granted account live (ACCEPTANCE.md). The fallback presumably lists every account the client's portfolio owns,
 which may be wider than the grant, so let the client pick the account rather than taking
 the first one. An empty result means the client granted no account: ask them to log in
 again and pick one.
@@ -534,7 +537,7 @@ Meta's error text never reaches exceptions or logs. Classification by `error.cod
 | 10 / 2018278, 10 / 2534022 | `window_closed` – outside the 24-hour window |
 | 100 / 2534025 | `reply_unavailable` – the comment is not eligible for a private reply |
 | message "User consent is required…" (no documented code) | `consent_required` |
-| 200, message "…disabled access to Instagram Direct Messaging…" | `messaging_disabled` – the owner must turn on "Allow access to messages" in Instagram |
+| 200, message "…disabled access to Instagram Direct Messaging…" (sending) or "…disabled access to instagram direct messages" (profile) | `messaging_disabled` – the owner must turn on "Allow access to messages" in Instagram |
 | 190 | `invalid_token` – the integration was removed or revoked: log in again |
 | 551, subcode 2018108 | `blocked` flag |
 | HTTP 5xx | `api_error` (`invalid_json` for a non-JSON body, e.g. a proxy HTML page), delivery uncertain |

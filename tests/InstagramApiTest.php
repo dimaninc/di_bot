@@ -63,6 +63,13 @@ final class InstagramApiTest extends TestCase
         $api->sendMessage('5', 'x');
         self::assertSame('https://ig-api.example/v26.0/17841400000000001/messages', $http->requests[0]->url);
         self::assertContains('X-Proxy-Auth: proxy-secret', $http->requests[0]->headers);
+        // Адрес Graph в любой записи – не прокси: секрет в Meta не уходит, путь не удваивается.
+        foreach (['https://Graph.Facebook.com', 'https://graph.facebook.com:443', 'https://graph.facebook.com/v26.0'] as $graph) {
+            [$api, $http] = $this->api([self::sent()], $graph, 'proxy-secret');
+            $api->sendMessage('5', 'x');
+            self::assertSame('https://graph.facebook.com/v26.0/17841400000000001/messages', $http->requests[0]->url, $graph);
+            self::assertNotContains('X-Proxy-Auth: proxy-secret', $http->requests[0]->headers, $graph);
+        }
         [$api] = $this->api([], 'https://ig-api.example');
         $this->expectException(\InvalidArgumentException::class);
         $api->sendMessage('5', 'x');
@@ -352,7 +359,7 @@ final class InstagramApiTest extends TestCase
         self::assertSame('POST', $r->method);
         self::assertSame(
             'https://graph.facebook.com/v26.0/17841400000000001/subscribed_apps?subscribed_fields=' .
-                rawurlencode('comments,live_comments,messages,messaging_postbacks'),
+                rawurlencode('comments,messages,messaging_postbacks'),
             $r->url
         );
         self::assertStringNotContainsString('ignored', $r->url . $r->body);

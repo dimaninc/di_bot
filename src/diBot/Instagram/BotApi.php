@@ -34,7 +34,9 @@ class BotApi extends AbstractBotApi
     public const PHOTO_MIMES = ['image/png', 'image/jpeg'];
     public const DOCUMENT_MIMES = ['application/pdf'];
     // Поля, на которые подписывается аккаунт. Набор полей адреса задаётся в панели Meta.
-    public const UPDATE_TYPES = ['comments', 'live_comments', 'messages', 'messaging_postbacks'];
+    // live_comments не подписываем: живьём проверена подписка без него, а с ним на Standard
+    // Access может отклониться вся подписка. События live_comments разбираются, если придут.
+    public const UPDATE_TYPES = ['comments', 'messages', 'messaging_postbacks'];
 
     public function platform(): Platform
     {
@@ -124,7 +126,8 @@ class BotApi extends AbstractBotApi
 
     /**
      * Читается только после согласия собеседника (написал, нажал кнопку или ice breaker);
-     * без него – ApiException с reason consent_required.
+     * без него – ApiException с reason consent_required, без «Доступа к сообщениям» у
+     * владельца – messaging_disabled.
      */
     public function getUserProfile(string $igsid): UserProfile
     {
@@ -384,7 +387,10 @@ class BotApi extends AbstractBotApi
         if (!preg_match('/^[A-Za-z0-9._|-]+$/D', $this->config->token)) {
             throw new ApiException(0, 'invalid_token');
         }
-        $base = rtrim($this->config->baseUrl ?: self::DEFAULT_BASE_URL, '/');
+        // Прокси – любой хост, кроме Graph; адрес Graph в любой записи (регистр, порт, путь) –
+        // канонический, иначе секрет прокси ушёл бы в саму Meta.
+        $proxied = Auth::isProxy($this->config->baseUrl);
+        $base = $proxied ? rtrim($this->config->baseUrl, '/') : self::DEFAULT_BASE_URL;
         if (parse_url($base, PHP_URL_QUERY) !== null) {
             throw new \InvalidArgumentException('API base URL cannot contain query');
         }
@@ -392,8 +398,7 @@ class BotApi extends AbstractBotApi
             'Authorization: Bearer ' . $this->config->token,
             'Content-Type: application/json',
         ];
-        // Хост без учёта регистра: иначе секрет прокси ушёл бы в саму Meta.
-        if (strcasecmp($base, self::DEFAULT_BASE_URL) !== 0) {
+        if ($proxied) {
             if ($this->config->proxySecret === '') {
                 throw new \InvalidArgumentException('Instagram proxy requires a secret');
             }

@@ -111,9 +111,10 @@ TLS проверен системным набором CA, IP соединени
   `parent_id` у ответа под комментарием. Тестовая отправка из панели может приходить в
   `changes` с полем `messages` – такие события адаптер пропускает.
 - [x] `setWebhook()` (`POST /{ig-user-id}/subscribed_apps`) отвечает `{"success":true}`
-  (31.10.2026, поля `comments,messages,messaging_postbacks`).
-- [ ] `DELETE /{ig-user-id}/subscribed_apps` отписывает аккаунт, повтор не ошибка;
-  подписка на `live_comments` принимается.
+  с полями `comments,messages,messaging_postbacks` – ровно `UPDATE_TYPES` (31.10.2026).
+- [ ] `DELETE /{ig-user-id}/subscribed_apps` отписывает аккаунт, повтор не ошибка.
+- [ ] Принимается ли подписка на `live_comments` (на Standard и на Advanced Access): пока
+  её нет в `UPDATE_TYPES`.
 - [ ] Единицы `entry.time` у событий `changes` (комментарии): секунды или миллисекунды.
 - [ ] `from.id` ответа самого бизнес-аккаунта под постом равен `entry.id` (на этом
   держится отсев своих комментариев).

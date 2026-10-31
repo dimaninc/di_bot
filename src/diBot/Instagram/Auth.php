@@ -232,10 +232,16 @@ final class Auth
         return $response->json();
     }
 
-    // Как в BotApi: явный адрес Graph – не прокси, секрет прокси в Meta не уходит.
+    /** Прокси – непустой адрес с хостом не Graph; общее правило Auth и BotApi. */
+    public static function isProxy(string $baseUrl): bool
+    {
+        return $baseUrl !== '' &&
+            strcasecmp((string) parse_url($baseUrl, PHP_URL_HOST), 'graph.facebook.com') !== 0;
+    }
+
     private function proxied(): bool
     {
-        return $this->baseUrl !== '' && strcasecmp(rtrim($this->baseUrl, '/'), self::GRAPH_BASE_URL) !== 0;
+        return self::isProxy($this->baseUrl);
     }
 
     // Коды Graph API: 10 и 200–299 – отказ в разрешении.
