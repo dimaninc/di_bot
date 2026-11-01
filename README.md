@@ -363,7 +363,8 @@ no longer returns `app_scoped_id`. Accounts connected through Instagram Login mu
 again. A proxy must now forward everything, including `/v26.0/oauth/access_token`, to
 `graph.facebook.com`: update it before the library. Any `baseUrl` other than
 `graph.facebook.com` is treated as a proxy, so an old explicit `https://graph.instagram.com`
-fails with "Instagram proxy requires a secret".
+fails with "Instagram proxy requires a secret". `setWebhook()` no longer subscribes
+`live_comments`: live video comments stop arriving after the next `setWebhook()`.
 
 ### Webhook, events and routing
 
@@ -477,10 +478,12 @@ That list can be empty even when an account was granted, so the fallback is
 `/{client_business_id}/owned_instagram_accounts`; it needs `business_management` in the
 configuration, and a permission error on its first page (codes 10, 200–299) means "nothing
 found", not a failure; on a later page it is an error. Neither path has yet returned the
-granted account live (ACCEPTANCE.md). The fallback presumably lists every account the client's portfolio owns,
-which may be wider than the grant, so let the client pick the account rather than taking
-the first one. An empty result means the client granted no account: ask them to log in
-again and pick one.
+granted account live (ACCEPTANCE.md). The fallback presumably lists every account the
+client's portfolio owns, which may be wider than the grant, so let the client pick the
+account rather than taking the first one. An empty result means "no account found", not
+"the client granted nothing": without `business_management` in the configuration a granted
+account may still come back empty, and a repeated login will not help. `accounts()` expects
+a BISU token; with any other token `/me` lookups fail with an API error.
 
 Meta takes the code exchange parameters, including the app secret, only in the query
 string; the library never logs URLs and scrubs client errors. Grant reads send the token

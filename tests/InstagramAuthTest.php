@@ -75,6 +75,7 @@ final class InstagramAuthTest extends TestCase
         $http = new FakeClient([
             FakeClient::json(['access_token' => 'BISU', 'token_type' => 'bearer']),
             FakeClient::json(['access_token' => 'TMP', 'expires_in' => 3600]),
+            FakeClient::json(['access_token' => 'TMP', 'expires_in' => '3600']),
         ]);
         $auth = self::auth($http);
         $token = $auth->exchangeCode('AQBx#_=_');
@@ -95,6 +96,7 @@ final class InstagramAuthTest extends TestCase
             $q
         );
         self::assertSame([], $r->headers);
+        self::assertSame(3600, $auth->exchangeCode('c')->expiresIn);
         self::assertSame(3600, $auth->exchangeCode('c')->expiresIn);
         self::assertStringNotContainsString('BISU', print_r($token, true));
         $this->expectException(\InvalidArgumentException::class);

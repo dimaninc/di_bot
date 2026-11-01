@@ -94,7 +94,10 @@ TLS проверен системным набором CA, IP соединени
   (31.10.2026) – это и есть «не найдено» запасного пути.
 - [ ] `/me/assigned_instagram_accounts` вернул `[]` при выданном аккаунте: проверить поиск
   аккаунта с `business_management` в конфигурации входа – и шире ли этот список выданного
-  при входе.
+  при входе. До этой проверки `accounts()` вживую выданный аккаунт не находит – блокер
+  подключения в приложении.
+- [x] `debug_token` такого токена: `granular_scopes` без `target_ids` (31.10.2026), поэтому
+  аккаунт оттуда не узнать.
 - [x] Graph API принимает токен заголовком `Authorization: Bearer` (так шлёт библиотека):
   `/me`, `/me/permissions` (только granted, 31.10.2026: `instagram_basic`,
   `instagram_manage_comments`, `instagram_manage_messages`, `instagram_content_publish`,

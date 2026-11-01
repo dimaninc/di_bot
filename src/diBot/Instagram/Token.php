@@ -6,7 +6,7 @@ readonly final class Token
 {
     public function __construct(
         #[\SensitiveParameter] public string $accessToken,
-        // Секунды жизни; 0 – бессрочный (так Meta выдаёт токен BISU).
+        // Секунды жизни; 0 – Meta срок не прислала (так выдаётся бессрочный токен BISU).
         public int $expiresIn = 0
     ) {
     }

@@ -97,6 +97,10 @@ final class Auth
             throw new ApiException(200, 'invalid_token_response');
         }
         $expires = $data['expires_in'] ?? 0;
+        // Срок строкой ("3600") – тоже срок, а не «бессрочный».
+        if (is_string($expires) && ctype_digit($expires)) {
+            $expires = (int) $expires;
+        }
         return new Token($token, is_int($expires) && $expires > 0 ? $expires : 0);
     }
 
