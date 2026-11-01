@@ -16,7 +16,9 @@ readonly final class Config
         public int $maxDownloadBytes = 5 * 1024 * 1024,
         public int $downloadTimeout = 30,
         // Telegram setWebhook max_connections (1–100); null – не передаётся, у Telegram это 40.
-        public ?int $webhookMaxConnections = null
+        public ?int $webhookMaxConnections = null,
+        // Только Instagram: IG user id аккаунта (Auth::accounts()), проверяется в BotApi.
+        public string $accountId = ''
     ) {
         foreach ([$token, $proxySecret, $webhookSecret] as $secret) {
             if (preg_match('/[\x00-\x20\x7f]/', $secret)) {

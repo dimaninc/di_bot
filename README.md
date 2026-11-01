@@ -335,12 +335,36 @@ the application's responsibility.
 
 ## Instagram
 
-`Platform::Instagram` uses the Instagram API with Instagram Login (`graph.instagram.com`,
-Graph API `Instagram\BotApi::GRAPH_VERSION`, now `v26.0`). `Config::token` is the
-account's long-lived Instagram user token, sent only as `Authorization: Bearer`, never in
-the URL. A custom `baseUrl` (a Worker proxy) requires `proxySecret`, sent as
-`X-Proxy-Auth`, as for Telegram. The bot never writes first: a message is allowed within
-24 hours of the user's last message, or as one private reply to a comment.
+`Platform::Instagram` uses the Instagram API with Facebook Login for Business
+(`graph.facebook.com`, Graph API `Instagram\BotApi::GRAPH_VERSION`, now `v26.0`).
+`Config::token` is the Business Integration System User (BISU) token from `Instagram\Auth`,
+sent only as `Authorization: Bearer`, never in the URL. `Config::accountId` is the
+Instagram account ID (`17841…`, from `Auth::accounts()`), numeric. Account calls
+(`getMe()`, messages, media, subscriptions) go to `/{accountId}/…` and fail without it –
+with this token `/me` is the system user, not the account. Comment, reply and profile calls
+are addressed by their own IDs.
+A custom `baseUrl` (a Worker proxy) requires `proxySecret`, sent as `X-Proxy-Auth`, as for
+Telegram. The bot never writes first: a message is allowed within 24 hours of the user's
+last message, or as one private reply to a comment.
+
+```php
+$config = new Config($bisuToken, accountId: $igAccountId);
+$api = Platform::Instagram->api($config);
+```
+
+The account owner must turn on "Allow access to messages" in the Instagram app settings.
+Without it every send fails with `messaging_disabled`.
+
+**Breaking changes in 0.5.0.** Instagram Login (`graph.instagram.com`, long-lived user
+tokens) is removed without a compatibility layer. `Auth` takes a `configId` and has no
+`longLived()`/`refresh()`; `authorizeUrl()` takes no scopes; `Token` has only
+`accessToken` and `expiresIn`; `Config::accountId` is required for Instagram; `getMe()`
+no longer returns `app_scoped_id`. Accounts connected through Instagram Login must log in
+again. A proxy must now forward everything, including `/v26.0/oauth/access_token`, to
+`graph.facebook.com`: update it before the library. Any `baseUrl` other than
+`graph.facebook.com` is treated as a proxy, so an old explicit `https://graph.instagram.com`
+fails with "Instagram proxy requires a secret". `setWebhook()` no longer subscribes
+`live_comments`: live video comments stop arriving after the next `setWebhook()`.
 
 ### Webhook, events and routing
 
@@ -411,40 +435,62 @@ Attachment URLs are signed CDN links: download them promptly with
 
 ### Accounts and OAuth
 
-`getMe()` returns `['account_id' => …, 'username' => …, 'app_scoped_id' => …]`.
-`account_id` is the `user_id` of `/me` and equals the webhook `entry_id`: store it to
-route events. `setWebhook($url)` ignores `$url` and subscribes the account to
-`UPDATE_TYPES` (`comments`, `live_comments`, `messages`, `messaging_postbacks`) with
-POST `/me/subscribed_apps`; `deleteWebhook()` sends DELETE `/me/subscribed_apps`.
-Unlike other platforms, `deleteWebhook($url)` ignores `$url` and unsubscribes the whole
-account (the subscription is per account): never call it from polling or dev setups that
-share the Meta app, or production stops receiving events.
+`getMe()` sends GET `/{accountId}?fields=id,username` and returns
+`['account_id' => …, 'username' => …]` as Meta returns them (not compared with
+`Config::accountId`); `account_id` is expected to equal the webhook `entry_id` (not yet
+verified live, see ACCEPTANCE). `setWebhook($url)` ignores
+`$url` and subscribes the account to `UPDATE_TYPES` (`comments`, `messages`,
+`messaging_postbacks` – the set verified live; `live_comments` is not subscribed, since on
+Standard Access it may fail the whole subscription, but such events are parsed if they
+arrive) with POST `/{accountId}/subscribed_apps`; `deleteWebhook()` sends DELETE
+`/{accountId}/subscribed_apps`. Unlike other platforms, `deleteWebhook($url)` ignores
+`$url` and unsubscribes the whole account (the subscription is per account): never call
+it from polling or dev setups that share the Meta app, or production stops receiving
+events.
 
-`Instagram\Auth` implements Business Login. The application keeps the state, stores tokens
-encrypted and schedules refreshes:
+`Instagram\Auth` implements Facebook Login for Business ("Unified Login"). Permissions
+come from a Login configuration in the Meta dashboard (`configId`), not from scopes. The
+application keeps the state and stores the token encrypted:
 
 ```php
-$auth = new Auth($appId, $appSecret, $redirectUri, baseUrl: $proxy, proxySecret: $secret);
-$url = $auth->authorizeUrl($state, [
-    'instagram_business_basic',
-    'instagram_business_manage_messages',
-    'instagram_business_manage_comments',
-]);
-$short = $auth->exchangeCode($code); // 1 hour; a trailing "#_" is stripped
-$long = $auth->longLived($short->accessToken); // 60 days
-$long = $auth->refresh($long->accessToken); // once the token is at least 24 hours old
+$auth = new Auth($appId, $appSecret, $configId, $redirectUri, baseUrl: $proxy, proxySecret: $secret);
+$url = $auth->authorizeUrl($state);          // facebook.com/v26.0/dialog/oauth?config_id=…
+$token = $auth->exchangeCode($code);         // a trailing "#_=_" is stripped
+$auth->permissions($token->accessToken);     // ['instagram_basic', …] – granted only
+$auth->clientBusinessId($token->accessToken); // the client's business portfolio, '' if none
+foreach ($auth->accounts($token->accessToken) as $account) {
+    // Instagram\Account: id (→ Config::accountId), username
+}
 ```
 
-`Token` has `accessToken`, `userId` (code exchange only), `expiresIn` (seconds, 0 when
-unknown) and `permissions`; `var_dump` redacts the token. Refresh well before 60 days: an
-expired token cannot be refreshed and needs a new login. Meta takes the parameters of the
-token endpoints, including the app secret and the token, only in the query string; the
-library never logs URLs and scrubs client errors. With a proxy, all calls go to `baseUrl`:
-the code exchange to `<baseUrl>/oauth/access_token` (the proxy forwards it to
-`api.instagram.com`), everything else to its usual `graph.instagram.com` path. The proxy
-then sees the app secret and tokens in the query of `/oauth/access_token`,
-`/access_token` and `/refresh_access_token`: it must not log request URLs (keep Workers
-Logs and Logpush off for it).
+The code exchange gives a BISU token: `Token` has `accessToken` and `expiresIn` (`0` – it
+never expires; there is nothing to refresh). It stops working when the client removes the
+integration or Meta revokes it (`invalid_token`): then a new login is needed. `var_dump`
+redacts the token. Use a Login configuration that issues a never-expiring system-user
+token. `expiresIn > 0` is passed through as is: either the configuration sets a token
+expiry (a system-user option) or it issues a user token, where `/me` is a person. The
+library refreshes neither; the application decides whether to accept such a token.
+
+`accounts()` lists the Instagram accounts the client granted. It reads
+`/me/assigned_instagram_accounts` (100 per page, at most `ACCOUNTS_MAX_PAGES` = 5 pages;
+a longer list is truncated silently – more is most likely a looping cursor).
+That list can be empty even when an account was granted, so the fallback is
+`/{client_business_id}/owned_instagram_accounts`; it needs `business_management` in the
+configuration, and a permission error on its first page (codes 10, 200–299) means "nothing
+found", not a failure; on a later page it is an error. Neither path has yet returned the
+granted account live (ACCEPTANCE.md). The fallback presumably lists every account the
+client's portfolio owns, which may be wider than the grant, so let the client pick the
+account rather than taking the first one. An empty result means "no account found", not
+"the client granted nothing": without `business_management` in the configuration a granted
+account may still come back empty, and a repeated login will not help. `accounts()` expects
+a BISU token; with any other token `/me` lookups fail with an API error.
+
+Meta takes the code exchange parameters, including the app secret, only in the query
+string; the library never logs URLs and scrubs client errors. Grant reads send the token
+as `Authorization: Bearer`. With a proxy, every call goes to `<baseUrl>/v26.0/…` with
+`X-Proxy-Auth` (the proxy forwards it to `graph.facebook.com`); the proxy then sees the
+app secret in the query of `/oauth/access_token`: it must not log request URLs (keep
+Workers Logs and Logpush off for it).
 
 ### Sending
 
@@ -481,7 +527,7 @@ Logs and Logpush off for it).
   delivered, `Sender` throws `PartialDeliveryException` (an `ApiException` with the text's
   reason and delay, plus `mediaResponse`): retry only the text, not the whole `send()`. A keyboard with empty text, or a refused media with empty text,
   throws `InvalidArgumentException` before any request: Instagram rejects empty messages.
-- `sendFileId()` (reusable attachment IDs need the Facebook Page API), `editMessage()`,
+- `sendFileId()` (reusable attachment IDs are not supported), `editMessage()`,
   `setCommands()` and `getUpdates()` throw `ApiException(reason: 'unsupported')`.
   `answerCallback()` is a local no-op.
 
@@ -496,13 +542,15 @@ Meta's error text never reaches exceptions or logs. Classification by `error.cod
 | 10 / 2018278, 10 / 2534022 | `window_closed` – outside the 24-hour window |
 | 100 / 2534025 | `reply_unavailable` – the comment is not eligible for a private reply |
 | message "User consent is required…" (no documented code) | `consent_required` |
-| 190 | `invalid_token` – refresh or reconnect |
+| 200, message "…disabled access to Instagram Direct Messaging…" (sending) or "…disabled access to instagram direct messages" (profile) | `messaging_disabled` – the owner must turn on "Allow access to messages" in Instagram |
+| 190 | `invalid_token` – the integration was removed or revoked: log in again |
 | 551, subcode 2018108 | `blocked` flag |
 | HTTP 5xx | `api_error` (`invalid_json` for a non-JSON body, e.g. a proxy HTML page), delivery uncertain |
 
 613 with subcodes 2018338 (flagged as abusive) and 1893016 is not throttling. A repeated
 private reply or one older than 7 days has no documented code and may surface as plain
-`api_error`. Published limits: 100 sends per second per account (10 for audio and video)
+`api_error`, as does "App does not have Advanced Access" (the recipient has no role on an
+app without Advanced Access). Published limits: 100 sends per second per account (10 for audio and video)
 and 750 private replies per hour for posts and reels.
 
 ## Development
@@ -529,14 +577,16 @@ Sources checked on 2026-09-28: [Telegram Bot API](https://core.telegram.org/bots
 [MAX webhook removal](https://dev.max.ru/docs-api/methods/DELETE/subscriptions),
 [MAX message editing](https://dev.max.ru/docs-api/methods/PUT/messages),
 [MAX callback answers](https://dev.max.ru/docs-api/methods/POST/answers).
-Instagram, checked on 2026-10-29:
+Instagram, checked on 2026-10-29 (pages under Instagram Login: the request shapes are the
+same with Facebook Login, only the host and `/{accountId}` differ; login itself –
+[Unified Login](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-unified-login/authentication)):
 [messaging API](https://developers.facebook.com/documentation/instagram-platform/instagram-api-with-instagram-login/messaging-api),
 [private replies](https://developers.facebook.com/documentation/instagram-platform/private-replies),
 [webhooks](https://developers.facebook.com/documentation/instagram-platform/webhooks/setup),
 [webhook examples](https://developers.facebook.com/documentation/instagram-platform/webhooks/examples),
-[Business Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/business-login),
-[tokens](https://developers.facebook.com/docs/instagram-platform/reference/access_token),
 [user profile](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/messaging-api/user-profile),
 [comment moderation](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/comment-moderation),
 [error codes](https://developers.facebook.com/docs/messenger-platform/error-codes).
+Facebook Login for Business (login URL, BISU token, `/{accountId}/…` calls) was verified
+live on Graph API v26.0 on 2026-10-31; account discovery is not (see ACCEPTANCE.md).
 [Package specification](SPEC.md).

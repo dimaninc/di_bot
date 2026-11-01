@@ -6,7 +6,7 @@ readonly final class MediaItem
 {
     public function __construct(
         public string $id,
-        // По справочнику Meta caption – только для Facebook Login; нет поля – ''.
+        // Нет поля – ''.
         public string $caption = '',
         // IMAGE, VIDEO, CAROUSEL_ALBUM – как прислала площадка.
         public string $mediaType = '',
